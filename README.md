@@ -15,25 +15,35 @@ stores nothing in your save, so it can be removed at any time.
   it, with profit each, a rough trip profit, and the map distance. Units are capped by your cash,
   the trader's stock and your free carry weight.
 - **Records your trades:** what you bought and sold, and the profit on goods you bought earlier.
+- **Helps your workshops:** for each workshop you own, where its inputs are cheapest and where
+  what it makes sells best.
+- **Pinned notes:** pin any run, price, rumour or trade. A pinned note keeps the wording and prices
+  from the day you pinned it; it is never refreshed and never ages out.
 
 ## Fair play
 
 TradeScribe only uses what your character could know: trade screens you opened, your own rumour
-list, map distance, and your own cash and carry capacity. It never reads another town's market and
+list, map distance, your own cash and carry capacity, and the workshops you own (what they use and
+make, their profit and capital, as on the clan screen). It never reads another town's market and
 never changes anything in the game.
 
 Rumours are the game's own: Bannerlord gives you a town's prices as rumours when you enter it, plus
 one rumour a day from a random town, and shows them in item tooltips. TradeScribe copies that list
 and keeps it; it does not create rumours.
 
-Loading an earlier save makes the ledger forget everything dated after that save: prices, rumours
-and trades from days your character has not lived yet. The rows stay in the CSV files behind a
-`REWIND` line, but the game no longer uses them.
+Loading an earlier save makes the ledger forget everything dated after that save: prices, rumours,
+pinned notes and trades from days your character has not lived yet. The rows stay in the CSV files behind a
+`REWIND` line (pinned notes are removed outright), but the game no longer uses them.
 
 ## Using it
 
 - Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
-- Menu entries: Best trade runs, What to buy here, Plan a run between two places, Prices for one good, Rumour log, My trades and profit.
+- Menu entries: Best trade runs, What to buy here, Plan a run between two places, My workshops,
+  Prices for one good, Rumour log, My trades and profit, Pinned notes.
+- Long lists are split into pages. **Next page** moves on; **Options** offers pinning, the previous
+  page and the way back to the menu.
+- To pin: **Options**, then **Pin something on this page**, then tick one or more entries. To
+  remove a note, open **Pinned notes** and use **Options** there.
 - Each sell price is marked **seen** (you saw it), **rumour** (from a live rumour) or **estimate**
   (worked out from that town's buy price).
 - Prices older than 20 days are ignored.
@@ -53,6 +63,7 @@ and trades from days your character has not lived yet. The rows stay in the CSV 
 | `observations.csv` | Every item on every trade screen you opened |
 | `rumours.csv` | Every trade rumour, with the day you heard it |
 | `trades.csv` | Every confirmed purchase and sale |
+| `pins.csv` | Your pinned notes |
 
 Errors, if any, go to `errors.txt` in the `TradeScribe` folder.
 

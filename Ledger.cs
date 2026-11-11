@@ -34,8 +34,53 @@ namespace TradeScribe
         public double Hour; public int Day, Units, Total, Profit, Matched; public string Date = "", TownId = "", Town = "", ItemId = "", Good = "", Action = "";
     }
 
+    /// A note the player chose to keep: the text is frozen when pinned and never refreshed or aged out.
+    public class Pin { public double Hour; public string Date = "", Text = ""; }
+
     public static class Ledger
     {
+        public static readonly List<Pin> Pins = new List<Pin>();
+        private static string PinPath => Path.Combine(Dir, "pins.csv");
+
+        public static int AddPins(IEnumerable<string> texts)
+        {
+            EnsureLoaded(); int added = 0;
+            foreach (string t in texts)
+            {
+                if (string.IsNullOrEmpty(t) || Pins.Any(p => p.Text == t)) continue;
+                Pins.Add(new Pin { Hour = NowHours, Date = CampaignTime.Now.ToString(), Text = t }); added++;
+            }
+            if (added > 0) { SavePins(); _maxHour = Math.Max(_maxHour, NowHours); }
+            return added;
+        }
+
+        public static void RemovePins(List<Pin> gone)
+        {
+            if (Pins.RemoveAll(p => gone.Contains(p)) > 0) SavePins();
+        }
+
+        private static void SavePins()
+        {
+            Directory.CreateDirectory(Dir);
+            var sb = new StringBuilder(); sb.AppendLine("Hour,Date,Text");
+            foreach (Pin p in Pins)
+                sb.AppendLine(string.Join(",", p.Hour.ToString("0.###", Inv), Csv.Q(p.Date), Csv.Q(p.Text.Replace("\r", "").Replace("\n", "\\n"))));
+            File.WriteAllText(PinPath, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        private static void LoadPins()
+        {
+            Pins.Clear();
+            if (!File.Exists(PinPath)) return;
+            foreach (string line in File.ReadAllLines(PinPath).Skip(1))
+            {
+                List<string> f = Csv.Parse(line);
+                if (f.Count < 3) continue;
+                Pins.Add(new Pin { Hour = D(f[0]), Date = f[1], Text = f[2].Replace("\\n", "\n") });
+                _maxHour = Math.Max(_maxHour, D(f[0]));
+            }
+        }
+
         private const string TradeHeader = "Day,Date,Town,Action,Units,Good,Total,Each,Profit,Units with known cost,TownId,ItemId,Hour";
         public static readonly List<Trade> Trades = new List<Trade>();
         // What the goods you bought and still hold cost you: item -> (units, total paid).
@@ -83,6 +128,8 @@ namespace TradeScribe
             foreach (string path in new[] { ObsPath, RumPath, TradePath })
                 if (File.Exists(path)) File.AppendAllText(path, mark, new UTF8Encoding(false));
             Load();
+            // Notes pinned after this moment go too: your character has not written them yet.
+            if (Pins.RemoveAll(p => p.Hour > now) > 0) { SavePins(); Load(); }
             int dropped = before - (Points.Count + Rumours.Count + Trades.Count);
             TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage(
                 "TradeScribe: an earlier save was loaded. Forgot " + dropped + " prices, rumours and trades from after this date.",
@@ -137,6 +184,7 @@ namespace TradeScribe
                     r.Hour = Hour(f, 8, r.DaySeen); rumours.Add(r);
                 }
             foreach (Rumour r in rumours) if (RumourKeys.Add(r.Key)) { Rumours.Add(r); _maxHour = Math.Max(_maxHour, r.Hour); }
+            LoadPins();
         }
 
         /// Works out the profit on a sale against what the same goods cost, and keeps the running cost of what is still held.

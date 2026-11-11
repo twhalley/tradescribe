@@ -17,11 +17,29 @@ namespace TradeScribe
         public string Line()
         {
             string s = "Buy " + (Units > 0 ? Units + " " : "") + Good + " in " + Buy.Town + " at " + Buy.Price
-                + ", sell in " + Sell.Town + " for " + Sell.Price + " (" + Sell.Basis + (Sell.Basis == "rumour" ? ", " + Math.Max(0, Ledger.Today - Sell.Day) + " days old" : "") + "): +" + Each + " each";
+                + ", sell in " + Sell.Town + " for " + Sell.Price + " (" + SellBasis() + "): +" + Each + " each";
             if (Units > 0) s += ", about +" + Trip + " for the trip";
-            if (Distance >= 0f) s += ", distance " + Distance.ToString("0");
             return s;
         }
+
+        public string SellBasis() => Sell.Basis + (Sell.Basis == "estimate" ? "" : ", " + Fmt.Age(Ledger.Today - Sell.Day));
+
+        /// Several short lines, easier to read than one long one.
+        public string Block()
+        {
+            string s = Good + ": +" + Fmt.N(Each) + " each" + (Units > 0 ? ", about +" + Fmt.N(Trip) + " for " + Units : "") + "\n"
+                + "    Buy in " + Buy.Town + " at " + Fmt.N(Buy.Price) + " (" + Buy.Stock + " in stock, seen " + Fmt.Age(Ledger.Today - Buy.Day) + ")\n"
+                + "    Sell in " + Sell.Town + " for " + Fmt.N(Sell.Price) + " (" + SellBasis() + ")";
+            if (Distance >= 0f) s += "\n    Distance " + Distance.ToString("0");
+            return s;
+        }
+    }
+
+    public static class Fmt
+    {
+        public static string N(int v) => v.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        public static string Age(int days) => days <= 0 ? "today" : days == 1 ? "1 day ago" : days + " days ago";
+        public static string Signed(int v) => (v >= 0 ? "+" : "-") + N(Math.Abs(v));
     }
 
     public static class Runs
@@ -91,6 +109,16 @@ namespace TradeScribe
                 runs.Add(best);
             }
             return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+        }
+
+        /// A sized run for one good between two quotes, or null when it would not pay.
+        public static Run Make(string itemId, Quote b, Quote s)
+        {
+            PricePoint p = Ledger.Points.Values.FirstOrDefault(x => x.ItemId == itemId);
+            if (p == null || b == null || s == null || s.Price <= b.Price) return null;
+            var run = new Run { ItemId = itemId, Good = p.Good, Weight = p.Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
+            Size(run, p.Type, Hero.MainHero != null ? Hero.MainHero.Gold : 0, FreeWeight());
+            return run;
         }
 
         private static void Size(Run run, string type, int cash, float free)
