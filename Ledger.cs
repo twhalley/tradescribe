@@ -117,6 +117,7 @@ namespace TradeScribe
         /// Loads this campaign's files when needed, and notices when an earlier save has been loaded.
         public static void EnsureLoaded()
         {
+            Settings.EnsureLoaded();
             string id = Campaign.Current.UniqueGameId ?? "campaign";
             if (id != _gameId) { _gameId = id; Load(); }
             double now = NowHours;

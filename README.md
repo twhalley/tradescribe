@@ -17,6 +17,9 @@ stores nothing in your save, so it can be removed at any time.
 - **Records your trades:** what you bought and sold, and the profit on goods you bought earlier.
 - **Helps your workshops:** for each workshop you own, where its inputs are cheapest and where
   what it makes sells best.
+- **Helps you choose a workshop:** ranks every kind of workshop for a town by the prices you have
+  seen there for what it uses and makes.
+- **Profit summary:** your trading profit by good and by town.
 - **Pinned notes:** pin any run, price, rumour or trade. A pinned note keeps the wording and prices
   from the day you pinned it; it is never refreshed and never ages out.
 
@@ -24,7 +27,11 @@ stores nothing in your save, so it can be removed at any time.
 
 TradeScribe only uses what your character could know: trade screens you opened, your own rumour
 list, map distance, your own cash and carry capacity, and the workshops you own (what they use and
-make, their profit and capital, as on the clan screen). It never reads another town's market and
+make, their profit and capital, as on the clan screen). The workshop chooser also uses the game's
+recipe for each kind of workshop (wool into garments, and so on), priced only from what you have seen.
+
+After you confirm a deal, the ledger takes the prices as the screen showed them after your own
+buying and selling, so a price you pushed down is not reported at its old level. It never reads another town's market and
 never changes anything in the game.
 
 Rumours are the game's own: Bannerlord gives you a town's prices as rumours when you enter it, plus
@@ -39,7 +46,10 @@ pinned notes and trades from days your character has not lived yet. The rows sta
 
 - Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
 - Menu entries: Best trade runs, What to buy here, Plan a run between two places, My workshops,
-  Prices for one good, Rumour log, My trades and profit, Pinned notes.
+  Which workshop suits a town, Prices for one good, Rumour log, My trades and profit, Profit by
+  good and by town, Pinned notes, Settings.
+- **Settings:** hide runs longer than a chosen distance, rank runs by profit per distance, and
+  choose how old a rumour may be before run suggestions ignore it (3 days by default).
 - Long lists are split into pages. **Next page** moves on; **Options** offers pinning, the previous
   page and the way back to the menu.
 - To pin: **Options**, then **Pin something on this page**, then tick one or more entries. To

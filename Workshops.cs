@@ -111,6 +111,65 @@ namespace TradeScribe
             return res;
         }
 
+        /// Average price of a kind of good in one town: from its trade screen, failing that from recent rumours.
+        private static int? PriceIn(string townId, string cat)
+        {
+            List<int> seen = Ledger.Points.Values.Where(p => p.TownId == townId && p.Buy > 0 && Runs.Fresh(p.BuyDay) && Category(p.ItemId) == cat)
+                .Select(p => p.Buy).ToList();
+            if (seen.Count == 0)
+                seen = Ledger.Rumours.Where(r => r.TownId == townId && r.Buy > 0 && Runs.RumourUsable(r) && Category(r.ItemId) == cat).Select(r => r.Buy).ToList();
+            return seen.Count == 0 ? (int?)null : (int)Math.Round(seen.Average());
+        }
+
+        public const string SuitFooter = "A rough guide from prices you have seen in this town. A batch is one round of production; it leaves out "
+            + "wages and how fast each workshop works, and prices shift once a workshop starts buying and selling. Not enough seen means a "
+            + "good it uses or makes was not on sale when you looked: scarce inputs are a bad sign, scarce products a good one.";
+
+        /// Every kind of workshop, ranked by what one batch would earn at the prices seen in this town.
+        public static List<Entry> Suits(string townId, string town)
+        {
+            var ranked = new List<KeyValuePair<int, Entry>>(); var unknown = new List<Entry>();
+            var owned = new HashSet<string>();
+            foreach (Workshop w in Hero.MainHero.OwnedWorkshops)
+                if (w?.WorkshopType != null && w.Settlement != null && w.Settlement.StringId == townId) owned.Add(w.WorkshopType.StringId);
+            foreach (WorkshopType type in WorkshopType.All)
+            {
+                if (type == null || type.IsHidden) continue;
+                int margin = 0; var uses = new List<string>(); var makes = new List<string>(); var missing = new List<string>();
+                foreach (WorkshopType.Production pr in type.Productions)
+                {
+                    foreach (var i in pr.Inputs)
+                    {
+                        if (i.Item1 == null) continue;
+                        int? p = PriceIn(townId, i.Item1.StringId);
+                        if (p == null) missing.Add(Pretty(i.Item1.StringId)); else { margin -= p.Value * i.Item2; uses.Add(i.Item2 + " " + Pretty(i.Item1.StringId) + " at " + Fmt.N(p.Value)); }
+                    }
+                    foreach (var o in pr.Outputs)
+                    {
+                        if (o.Item1 == null) continue;
+                        int? p = PriceIn(townId, o.Item1.StringId);
+                        if (p == null) missing.Add(Pretty(o.Item1.StringId)); else { margin += p.Value * o.Item2; makes.Add(o.Item2 + " " + Pretty(o.Item1.StringId) + " at " + Fmt.N(p.Value)); }
+                    }
+                }
+                if (uses.Count + makes.Count + missing.Count == 0) continue;
+                string name = type.Name + (owned.Contains(type.StringId) ? " (you own one here)" : "");
+                string detail = (uses.Count > 0 ? "\n    Uses " + string.Join(", ", uses.Distinct()) : "") + (makes.Count > 0 ? "\n    Makes " + string.Join(", ", makes.Distinct()) : "");
+                if (missing.Count > 0)
+                {
+                    string t = name + ": not enough seen" + detail + "\n    No price seen here for " + string.Join(", ", missing.Distinct());
+                    unknown.Add(new Entry { Header = "Not enough seen", Text = t, Pin = town + ", " + t });
+                }
+                else
+                {
+                    string t = name + ": about " + Fmt.Signed(margin) + " a batch" + detail;
+                    ranked.Add(new KeyValuePair<int, Entry>(margin, new Entry { Header = "Best first", Text = t, Pin = town + ", " + t }));
+                }
+            }
+            List<Entry> res = ranked.OrderByDescending(x => x.Key).Select(x => x.Value).ToList();
+            res.AddRange(unknown);
+            return res;
+        }
+
         private static Entry Unknown(string head, string verb, string cat)
         {
             string t = verb + " " + Pretty(cat) + "\n    No price seen for it yet. Open trade screens to find it.";

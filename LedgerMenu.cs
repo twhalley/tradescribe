@@ -40,10 +40,13 @@ namespace TradeScribe
                 new InquiryElement("here", "What to buy here", null, Settlement.CurrentSettlement != null, "Only available inside a settlement"),
                 new InquiryElement("route", "Plan a run between two places", null),
                 new InquiryElement("shops", "My workshops (" + shops + ")", null),
+                new InquiryElement("suit", "Which workshop suits a town", null),
                 new InquiryElement("good", "Prices for one good", null),
                 new InquiryElement("rumours", "Rumour log", null),
                 new InquiryElement("trades", "My trades and profit", null),
+                new InquiryElement("summary", "Profit by good and by town", null),
                 new InquiryElement("pins", "Pinned notes (" + Ledger.Pins.Count + ")", null),
+                new InquiryElement("settings", "Settings", null),
             };
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Trade ledger", desc, items, true, 1, 1, "Open", "Close",
                 picked =>
@@ -58,6 +61,9 @@ namespace TradeScribe
                     else if (id == "trades") _pending = ShowTrades;
                     else if (id == "rumours") _pending = ShowRumours;
                     else if (id == "pins") _pending = () => ShowPinned(0);
+                    else if (id == "suit") _pending = PickWorkshopTown;
+                    else if (id == "summary") _pending = ShowSummary;
+                    else if (id == "settings") _pending = ShowSettings;
                 }, null), true);
         }
 
@@ -169,7 +175,9 @@ namespace TradeScribe
 
         private static string RunFooter()
         {
-            return "Trip profit is rough: prices move as you buy and sell. Estimates assume traders pay about "
+            return (Settings.MaxDistance > 0 ? "Runs longer than distance " + Settings.MaxDistance + " are hidden. " : "")
+                + (Settings.PerDistance ? "Ranked by profit per distance. " : "")
+                + "Rumours older than " + Settings.RumourDays + " days are not used. Change these under Settings.\n" + "Trip profit is rough: prices move as you buy and sell. Estimates assume traders pay about "
                 + Math.Round(Runs.SellRatio("Trade good") * 100) + "% of their own price for goods and "
                 + Math.Round(Runs.SellRatio("Horse") * 100) + "% for horses and livestock.";
         }
@@ -187,6 +195,94 @@ namespace TradeScribe
             ShowPages("My workshops", null, Workshops.Entries(),
                 "You own no workshops. When you buy one, this page shows where to find what it uses and where to sell what it makes.",
                 Workshops.Footer, 3);
+        }
+
+        private static void PickWorkshopTown()
+        {
+            string here = Settlement.CurrentSettlement?.StringId;
+            List<InquiryElement> items = Runs.KnownPlaces().Where(p => { Settlement s = Settlement.Find(p.Key); return s != null && s.IsTown; })
+                .OrderByDescending(p => p.Key == here)
+                .Select(p => new InquiryElement(p.Key, p.Value + (p.Key == here ? " (you are here)" : ""), null)).ToList();
+            if (items.Count == 0)
+            {
+                ShowPages("Which workshop suits a town", null, new List<Entry>(), "No town prices seen yet. Open a town's trade screen first.", null, 4);
+                return;
+            }
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Which workshop suits a town", "Pick a town whose prices you have seen.",
+                items, true, 1, 1, "Show", "Back",
+                picked =>
+                {
+                    if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
+                    string id = picked[0].Identifier as string; string name = picked[0].Title.Replace(" (you are here)", "");
+                    _pending = () => ShowPages("Workshops for " + name, null, Workshops.Suits(id, name),
+                        "No workshop types found.", Workshops.SuitFooter, 4);
+                }, _ => { _pending = ShowMain; }, "", true), true);
+        }
+
+        private static void ShowSummary()
+        {
+            var entries = new List<Entry>();
+            List<Trade> sales = Ledger.Trades.Where(t => t.Action == "Sold" && t.Matched > 0).ToList();
+            foreach (var g in sales.GroupBy(t => t.Good).Select(g => new { g.Key, Profit = g.Sum(t => t.Profit), Units = g.Sum(t => t.Matched) }).OrderByDescending(x => x.Profit))
+            {
+                string t = g.Key + ": " + Fmt.Signed(g.Profit) + " on " + Fmt.N(g.Units) + " sold (" + Fmt.Signed((int)Math.Round((double)g.Profit / Math.Max(1, g.Units))) + " each)";
+                entries.Add(new Entry { Header = "By good, best first", Text = t, Pin = "Profit so far, " + t });
+            }
+            foreach (var g in sales.GroupBy(t => t.Town).Select(g => new { g.Key, Profit = g.Sum(t => t.Profit), Count = g.Count() }).OrderByDescending(x => x.Profit))
+            {
+                string t = g.Key + ": " + Fmt.Signed(g.Profit) + " from " + g.Count + " sale" + (g.Count == 1 ? "" : "s");
+                entries.Add(new Entry { Header = "By town you sold in, best first", Text = t, Pin = "Profit so far, sold in " + t });
+            }
+            foreach (var g in Ledger.Trades.Where(t => t.Action == "Bought").GroupBy(t => t.Town)
+                .Select(g => new { g.Key, Spent = g.Sum(t => t.Total) }).OrderByDescending(x => x.Spent))
+            {
+                string t = g.Key + ": spent " + Fmt.N(g.Spent);
+                entries.Add(new Entry { Header = "By town you bought in", Text = t, Pin = "Spent so far in " + t });
+            }
+            ShowPages("Profit by good and by town", "Total trading profit: " + Fmt.Signed(sales.Sum(t => t.Profit)), entries,
+                "No sales of goods you bought earlier yet.", "Profit counts only goods TradeScribe saw you buy. Loot and older stock are left out.", 12);
+        }
+
+        private static void ShowSettings()
+        {
+            var items = new List<InquiryElement>
+            {
+                new InquiryElement("dist", "Longest run: " + (Settings.MaxDistance > 0 ? "distance " + Settings.MaxDistance : "no limit"), null),
+                new InquiryElement("rank", "Rank runs by: " + (Settings.PerDistance ? "profit per distance" : "trip profit") + " (choose to switch)", null),
+                new InquiryElement("rum", "Use rumours up to: " + (Settings.RumourDays == 0 ? "never (seen prices and estimates only)" : Settings.RumourDays + " days old"), null),
+            };
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Settings", "These shape the run suggestions. The rumour log itself keeps everything.",
+                items, true, 1, 1, "Change", "Back",
+                picked =>
+                {
+                    string id = picked != null && picked.Count > 0 ? picked[0].Identifier as string : null;
+                    if (id == "rank") { Settings.PerDistance = !Settings.PerDistance; Settings.Save(); _pending = ShowSettings; }
+                    else if (id == "dist") _pending = PickDistance;
+                    else if (id == "rum") _pending = () => PickNumber("Use rumours up to", "Old rumours can be well off. Seen prices are not affected.",
+                        new[] { 0, 1, 2, 3, 5, 10 }, v => v == 0 ? "Never use rumours for runs" : v + (v == 1 ? " day old" : " days old"), v => Settings.RumourDays = v);
+                    else _pending = ShowMain;
+                }, _ => { _pending = ShowMain; }, "", false), true);
+        }
+
+        private static void PickDistance()
+        {
+            // Show how many of the known runs fit under each limit, so the numbers mean something.
+            int keep = Settings.MaxDistance; Settings.MaxDistance = 0;
+            List<float> d; try { d = Runs.Best().Where(r => r.Distance >= 0f).Select(r => r.Distance).ToList(); } finally { Settings.MaxDistance = keep; }
+            PickNumber("Longest run", "Runs further than this are hidden." + (d.Count > 0 ? " Your known runs range from distance " + d.Min().ToString("0") + " to " + d.Max().ToString("0") + "." : ""),
+                new[] { 0, 50, 100, 150, 200, 300, 400, 600, 800 },
+                v => v == 0 ? "No limit" : "Up to " + v + " (" + d.Count(x => x <= v) + " of " + d.Count + " known runs)", v => Settings.MaxDistance = v);
+        }
+
+        private static void PickNumber(string title, string desc, int[] options, Func<int, string> label, Action<int> set)
+        {
+            List<InquiryElement> items = options.Select(v => new InquiryElement(v, label(v), null)).ToList();
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(title, desc, items, true, 1, 1, "Set", "Back",
+                picked =>
+                {
+                    if (picked != null && picked.Count > 0) { set((int)picked[0].Identifier); Settings.Save(); }
+                    _pending = ShowSettings;
+                }, _ => { _pending = ShowSettings; }, "", false), true);
         }
 
         private static void ShowGoods()

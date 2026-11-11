@@ -30,7 +30,8 @@ namespace TradeScribe
             string s = Good + ": +" + Fmt.N(Each) + " each" + (Units > 0 ? ", about +" + Fmt.N(Trip) + " for " + Units : "") + "\n"
                 + "    Buy in " + Buy.Town + " at " + Fmt.N(Buy.Price) + " (" + Buy.Stock + " in stock, seen " + Fmt.Age(Ledger.Today - Buy.Day) + ")\n"
                 + "    Sell in " + Sell.Town + " for " + Fmt.N(Sell.Price) + " (" + SellBasis() + ")";
-            if (Distance >= 0f) s += "\n    Distance " + Distance.ToString("0");
+            if (Distance >= 0f) s += "\n    Distance " + Distance.ToString("0")
+                + (Units > 0 && Distance > 1f ? " (+" + (Trip / Distance).ToString("0.#") + " per unit of distance)" : "");
             return s;
         }
     }
@@ -59,6 +60,23 @@ namespace TradeScribe
             return r.Count == 0 ? 0.5f : r[r.Count / 2];
         }
 
+        /// Rumours go stale fast, so only recent ones feed run suggestions. The rumour log keeps them all.
+        public static bool RumourUsable(Rumour r) => r.EndDay >= Ledger.Today && Ledger.Today - r.DaySeen <= Settings.RumourDays;
+
+        private static bool TooFar(string fromId, string toId)
+        {
+            if (Settings.MaxDistance <= 0) return false;
+            float d = Distance(fromId, toId);
+            return d >= 0f && d > Settings.MaxDistance;
+        }
+
+        private static List<Run> Rank(List<Run> runs)
+        {
+            if (Settings.PerDistance)
+                return runs.OrderByDescending(r => r.Distance > 1f ? r.Trip / r.Distance : r.Trip).ThenByDescending(r => r.Each).ToList();
+            return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+        }
+
         public static bool Fresh(int day) => day >= 0 && Ledger.Today - day <= MaxAgeDays;
 
         public static List<Quote> BuyQuotes(string itemId)
@@ -78,7 +96,7 @@ namespace TradeScribe
                 if (p.ItemId == itemId && p.Sell > 0 && Fresh(p.SellDay))
                     byTown[p.TownId] = new Quote { TownId = p.TownId, Town = p.Town, Price = p.Sell, Day = p.SellDay, Basis = "seen" };
             foreach (Rumour r in Ledger.Rumours)
-                if (r.ItemId == itemId && r.Sell > 0 && r.EndDay >= Ledger.Today && !byTown.ContainsKey(r.TownId))
+                if (r.ItemId == itemId && r.Sell > 0 && RumourUsable(r) && !byTown.ContainsKey(r.TownId))
                     byTown[r.TownId] = new Quote { TownId = r.TownId, Town = r.Town, Price = r.Sell, Day = r.DaySeen, Basis = "rumour" };
             foreach (PricePoint p in Ledger.Points.Values)
                 if (p.ItemId == itemId && p.Buy > 0 && Fresh(p.BuyDay) && !byTown.ContainsKey(p.TownId))
@@ -100,7 +118,7 @@ namespace TradeScribe
                 foreach (Quote b in buys)
                     foreach (Quote s in sells)
                     {
-                        if (s.TownId == b.TownId || s.Price <= b.Price) continue;
+                        if (s.TownId == b.TownId || s.Price <= b.Price || TooFar(b.TownId, s.TownId)) continue;
                         if (best == null || s.Price - b.Price > best.Each)
                             best = new Run { ItemId = g.Key, Good = g.First().Good, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
                     }
@@ -108,7 +126,7 @@ namespace TradeScribe
                 Size(best, g.First().Type, cash, free);
                 runs.Add(best);
             }
-            return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+            return Rank(runs);
         }
 
         /// A sized run for one good between two quotes, or null when it would not pay.
@@ -145,7 +163,7 @@ namespace TradeScribe
                 Size(run, g.First().Type, cash, free);
                 runs.Add(run);
             }
-            return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+            return Rank(runs);
         }
 
         /// Places with any known price: seen on a trade screen or named in a rumour.
@@ -153,7 +171,7 @@ namespace TradeScribe
         {
             var d = new Dictionary<string, string>();
             foreach (PricePoint p in Ledger.Points.Values) d[p.TownId] = p.Town;
-            foreach (Rumour r in Ledger.Rumours) if (r.EndDay >= Ledger.Today && !d.ContainsKey(r.TownId)) d[r.TownId] = r.Town;
+            foreach (Rumour r in Ledger.Rumours) if (RumourUsable(r) && !d.ContainsKey(r.TownId)) d[r.TownId] = r.Town;
             return d.OrderBy(k => k.Value).ToList();
         }
 
