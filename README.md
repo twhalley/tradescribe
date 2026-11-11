@@ -22,6 +22,10 @@ TradeScribe only uses what your character could know: trade screens you opened, 
 list, map distance, and your own cash and carry capacity. It never reads another town's market and
 never changes anything in the game.
 
+Rumours are the game's own: Bannerlord gives you a town's prices as rumours when you enter it, plus
+one rumour a day from a random town, and shows them in item tooltips. TradeScribe copies that list
+and keeps it; it does not create rumours.
+
 ## Using it
 
 - Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
