@@ -84,7 +84,8 @@ namespace TradeScribe
             var sb = new StringBuilder(); int n = 0;
             foreach (Run r in runs.Take(10)) sb.Append(++n).Append(". ").AppendLine(r.Line());
             sb.AppendLine().Append("Trip profit is rough: prices move as you buy and sell. Estimates assume traders pay about "
-                + Math.Round(Runs.SellRatio() * 100) + "% of their own price.");
+                + Math.Round(Runs.SellRatio("Trade good") * 100) + "% of their own price for goods and "
+                + Math.Round(Runs.SellRatio("Horse") * 100) + "% for horses and livestock.");
             return sb.ToString();
         }
 

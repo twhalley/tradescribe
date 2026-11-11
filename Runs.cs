@@ -29,10 +29,15 @@ namespace TradeScribe
         public const int MaxAgeDays = 20;
         private static readonly HashSet<string> TradeTypes = new HashSet<string> { "Food", "Trade good", "Animal", "Horse" };
 
-        /// Share of the buy price a trader pays, taken from towns where both prices were seen. 0.5 until there is data.
-        public static float SellRatio()
+        private static bool Walks(string type) => type == "Horse" || type == "Animal";
+
+        /// Share of the buy price a trader pays you, taken from towns where both prices were seen on the same day.
+        /// Horses and livestock are measured separately from goods: traders pay far less of the asking price for them.
+        public static float SellRatio(string type)
         {
-            List<float> r = Ledger.Points.Values.Where(p => p.Buy > 0 && p.Sell > 0 && p.BuyDay == p.SellDay).Select(p => (float)p.Sell / p.Buy).OrderBy(x => x).ToList();
+            bool walks = Walks(type);
+            List<float> r = Ledger.Points.Values.Where(p => p.Buy > 0 && p.Sell > 0 && p.BuyDay == p.SellDay && Walks(p.Type) == walks)
+                .Select(p => (float)p.Sell / p.Buy).OrderBy(x => x).ToList();
             return r.Count == 0 ? 0.5f : r[r.Count / 2];
         }
 
@@ -50,7 +55,7 @@ namespace TradeScribe
         /// Best known sell price per town: seen first, then a live rumour, then an estimate from the buy price.
         public static List<Quote> SellQuotes(string itemId)
         {
-            var byTown = new Dictionary<string, Quote>(); float ratio = SellRatio();
+            var byTown = new Dictionary<string, Quote>();
             foreach (PricePoint p in Ledger.Points.Values)
                 if (p.ItemId == itemId && p.Sell > 0 && Fresh(p.SellDay))
                     byTown[p.TownId] = new Quote { TownId = p.TownId, Town = p.Town, Price = p.Sell, Day = p.SellDay, Basis = "seen" };
@@ -59,7 +64,7 @@ namespace TradeScribe
                     byTown[r.TownId] = new Quote { TownId = r.TownId, Town = r.Town, Price = r.Sell, Day = r.DaySeen, Basis = "rumour" };
             foreach (PricePoint p in Ledger.Points.Values)
                 if (p.ItemId == itemId && p.Buy > 0 && Fresh(p.BuyDay) && !byTown.ContainsKey(p.TownId))
-                    byTown[p.TownId] = new Quote { TownId = p.TownId, Town = p.Town, Price = (int)Math.Round(p.Buy * ratio), Day = p.BuyDay, Basis = "estimate" };
+                    byTown[p.TownId] = new Quote { TownId = p.TownId, Town = p.Town, Price = (int)Math.Round(p.Buy * SellRatio(p.Type)), Day = p.BuyDay, Basis = "estimate" };
             return byTown.Values.ToList();
         }
 
