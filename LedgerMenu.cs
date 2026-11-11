@@ -34,6 +34,7 @@ namespace TradeScribe
             {
                 new InquiryElement("runs", "Best trade runs", null),
                 new InquiryElement("here", "What to buy here", null, Settlement.CurrentSettlement != null, "Only available inside a settlement"),
+                new InquiryElement("route", "Plan a run between two places", null),
                 new InquiryElement("good", "Prices for one good", null),
                 new InquiryElement("rumours", "Rumour log", null),
                 new InquiryElement("trades", "My trades and profit", null),
@@ -44,6 +45,7 @@ namespace TradeScribe
                     string id = picked != null && picked.Count > 0 ? picked[0].Identifier as string : null;
                     if (id == "runs") _pending = () => ShowText("Best trade runs", RunsText(Runs.Best(), "No profitable run known yet. Open the trade screen in a second town."));
                     else if (id == "here") _pending = ShowHere;
+                    else if (id == "route") _pending = () => PickPlace(null);
                     else if (id == "good") _pending = ShowGoods;
                     else if (id == "trades") _pending = () => ShowText("My trades and profit", TradesText());
                     else if (id == "rumours") _pending = () => ShowText("Rumour log", RumourText());
@@ -71,6 +73,44 @@ namespace TradeScribe
                     string id = picked[0].Identifier as string; string title = picked[0].Title;
                     _pending = () => ShowText(title, GoodText(id));
                 }, _ => { _pending = ShowMain; }, "", true), true);
+        }
+
+        /// Pick the start, then the destination, then show what to carry each way.
+        private static void PickPlace(string fromId)
+        {
+            List<KeyValuePair<string, string>> places = Runs.KnownPlaces();
+            string here = Settlement.CurrentSettlement?.StringId;
+            if (fromId == null && places.Count < 2) { ShowText("Plan a run", "You need prices for at least two places. Open a trade screen in a second town."); return; }
+            // Where you are standing goes first in the list.
+            List<InquiryElement> items = places.Where(p => p.Key != fromId).OrderByDescending(p => p.Key == here)
+                .Select(p => new InquiryElement(p.Key, p.Value + (p.Key == here ? " (you are here)" : ""), null)).ToList();
+            string fromName = fromId == null ? null : places.Where(p => p.Key == fromId).Select(p => p.Value).FirstOrDefault();
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Plan a run",
+                fromId == null ? "Pick where you will buy." : "Buying in " + fromName + ". Pick where you will sell.", items, true, 1, 1, "Next", "Back",
+                picked =>
+                {
+                    if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
+                    string id = picked[0].Identifier as string;
+                    if (fromId == null) { _pending = () => PickPlace(id); return; }
+                    string toName = places.Where(p => p.Key == id).Select(p => p.Value).FirstOrDefault();
+                    _pending = () => ShowText(fromName + " and " + toName, RouteText(fromId, fromName, id, toName));
+                }, _ => { _pending = ShowMain; }, "", true), true);
+        }
+
+        private static string RouteText(string aId, string a, string bId, string b)
+        {
+            var sb = new StringBuilder();
+            foreach (var leg in new[] { new[] { aId, a, bId, b }, new[] { bId, b, aId, a } })
+            {
+                List<Run> runs = Runs.Between(leg[0], leg[2]);
+                sb.AppendLine(leg[1] + " to " + leg[3] + ":");
+                if (runs.Count == 0) sb.AppendLine("  nothing known to be worth carrying");
+                int n = 0;
+                foreach (Run r in runs.Take(5)) sb.AppendLine("  " + (++n) + ". " + r.Line());
+                sb.AppendLine();
+            }
+            sb.Append("Buy prices are ones you saw on a trade screen there. Sell prices marked estimate are the least reliable; old rumours can be well off.");
+            return sb.ToString();
         }
 
         private static void ShowText(string title, string text)

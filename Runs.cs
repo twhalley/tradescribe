@@ -17,7 +17,7 @@ namespace TradeScribe
         public string Line()
         {
             string s = "Buy " + (Units > 0 ? Units + " " : "") + Good + " in " + Buy.Town + " at " + Buy.Price
-                + ", sell in " + Sell.Town + " for " + Sell.Price + " (" + Sell.Basis + "): +" + Each + " each";
+                + ", sell in " + Sell.Town + " for " + Sell.Price + " (" + Sell.Basis + (Sell.Basis == "rumour" ? ", " + Math.Max(0, Ledger.Today - Sell.Day) + " days old" : "") + "): +" + Each + " each";
             if (Units > 0) s += ", about +" + Trip + " for the trip";
             if (Distance >= 0f) s += ", distance " + Distance.ToString("0");
             return s;
@@ -87,15 +87,46 @@ namespace TradeScribe
                             best = new Run { ItemId = g.Key, Good = g.First().Good, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
                     }
                 if (best == null) continue;
-                int units = Math.Min(best.Buy.Stock, cash / Math.Max(1, best.Buy.Price));
-                // Horses and livestock walk; they do not use carry capacity.
-                bool walks = g.First().Type == "Horse" || g.First().Type == "Animal";
-                if (!walks && best.Weight > 0.01f && free >= 0f) units = Math.Min(units, (int)(free / best.Weight));
-                best.Units = Math.Max(0, units); best.Trip = best.Units * best.Each;
-                best.Distance = Distance(best.Buy.TownId, best.Sell.TownId);
+                Size(best, g.First().Type, cash, free);
                 runs.Add(best);
             }
             return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+        }
+
+        private static void Size(Run run, string type, int cash, float free)
+        {
+            int units = Math.Min(run.Buy.Stock, cash / Math.Max(1, run.Buy.Price));
+            // Horses and livestock walk; they do not use carry capacity.
+            if (!Walks(type) && run.Weight > 0.01f && free >= 0f) units = Math.Min(units, (int)(free / run.Weight));
+            run.Units = Math.Max(0, units); run.Trip = run.Units * run.Each;
+            run.Distance = Distance(run.Buy.TownId, run.Sell.TownId);
+        }
+
+        /// Every good worth carrying from one chosen place to another, best first.
+        public static List<Run> Between(string fromId, string toId)
+        {
+            int cash = Hero.MainHero != null ? Hero.MainHero.Gold : 0;
+            float free = FreeWeight();
+            var runs = new List<Run>();
+            foreach (IGrouping<string, PricePoint> g in Ledger.Points.Values.Where(p => TradeTypes.Contains(p.Type)).GroupBy(p => p.ItemId))
+            {
+                Quote b = BuyQuotes(g.Key).FirstOrDefault(q => q.TownId == fromId);
+                Quote s = SellQuotes(g.Key).FirstOrDefault(q => q.TownId == toId);
+                if (b == null || s == null || s.Price <= b.Price) continue;
+                var run = new Run { ItemId = g.Key, Good = g.First().Good, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
+                Size(run, g.First().Type, cash, free);
+                runs.Add(run);
+            }
+            return runs.OrderByDescending(r => r.Trip).ThenByDescending(r => r.Each).ToList();
+        }
+
+        /// Places with any known price: seen on a trade screen or named in a rumour.
+        public static List<KeyValuePair<string, string>> KnownPlaces()
+        {
+            var d = new Dictionary<string, string>();
+            foreach (PricePoint p in Ledger.Points.Values) d[p.TownId] = p.Town;
+            foreach (Rumour r in Ledger.Rumours) if (r.EndDay >= Ledger.Today && !d.ContainsKey(r.TownId)) d[r.TownId] = r.Town;
+            return d.OrderBy(k => k.Value).ToList();
         }
 
         private static float FreeWeight()

@@ -29,7 +29,7 @@ and keeps it; it does not create rumours.
 ## Using it
 
 - Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
-- Menu entries: Best trade runs, What to buy here, Prices for one good, Rumour log, My trades and profit.
+- Menu entries: Best trade runs, What to buy here, Plan a run between two places, Prices for one good, Rumour log, My trades and profit.
 - Each sell price is marked **seen** (you saw it), **rumour** (from a live rumour) or **estimate**
   (worked out from that town's buy price).
 - Prices older than 20 days are ignored.
