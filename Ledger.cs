@@ -13,7 +13,7 @@ namespace TradeScribe
 {
     public class Obs
     {
-        public long Snap; public int Day; public string TownId = "", Town = "", ItemId = "", Good = "", Type = "", Date = "";
+        public long Snap; public double Hour; public int Day; public string TownId = "", Town = "", ItemId = "", Good = "", Type = "", Date = "";
         public int Buy = -1, Sell = -1, Stock, Held; public float Weight;
     }
 
@@ -25,18 +25,18 @@ namespace TradeScribe
 
     public class Rumour
     {
-        public int DaySeen, EndDay, Buy, Sell; public string TownId = "", Town = "", ItemId = "", Good = "";
+        public double Hour; public int DaySeen, EndDay, Buy, Sell; public string TownId = "", Town = "", ItemId = "", Good = "";
         public string Key => TownId + "|" + ItemId + "|" + EndDay + "|" + Buy + "|" + Sell;
     }
 
     public class Trade
     {
-        public int Day, Units, Total, Profit, Matched; public string Date = "", TownId = "", Town = "", ItemId = "", Good = "", Action = "";
+        public double Hour; public int Day, Units, Total, Profit, Matched; public string Date = "", TownId = "", Town = "", ItemId = "", Good = "", Action = "";
     }
 
     public static class Ledger
     {
-        private const string TradeHeader = "Day,Date,Town,Action,Units,Good,Total,Each,Profit,Units with known cost,TownId,ItemId";
+        private const string TradeHeader = "Day,Date,Town,Action,Units,Good,Total,Each,Profit,Units with known cost,TownId,ItemId,Hour";
         public static readonly List<Trade> Trades = new List<Trade>();
         // What the goods you bought and still hold cost you: item -> (units, total paid).
         private static readonly Dictionary<string, KeyValuePair<int, int>> Basis = new Dictionary<string, KeyValuePair<int, int>>();
@@ -44,8 +44,8 @@ namespace TradeScribe
 
         public static readonly string Root = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Mount and Blade II Bannerlord", "TradeScribe");
-        private const string ObsHeader = "Snap,Day,Town,Good,Buy price,Sell price,Stock,Type,Date,Held,TownId,ItemId,Weight";
-        private const string RumHeader = "Day seen,Town,Good,Buy price,Sell price,Expires day,TownId,ItemId";
+        private const string ObsHeader = "Snap,Day,Town,Good,Buy price,Sell price,Stock,Type,Date,Held,TownId,ItemId,Weight,Hour";
+        private const string RumHeader = "Day seen,Town,Good,Buy price,Sell price,Expires day,TownId,ItemId,Hour";
 
         private static string _gameId;
         public static readonly Dictionary<string, PricePoint> Points = new Dictionary<string, PricePoint>();
@@ -54,6 +54,9 @@ namespace TradeScribe
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
         public static int Today => (int)CampaignTime.Now.ToDays;
+        public static double NowHours => CampaignTime.Now.ToHours;
+        private static double _maxHour;   // latest game time of anything in the ledger
+        private const string Rewind = "REWIND";
         private static string Dir => Path.Combine(Root, Safe(_gameId));
         private static string ObsPath => Path.Combine(Dir, "observations.csv");
         private static string RumPath => Path.Combine(Dir, "rumours.csv");
@@ -66,44 +69,74 @@ namespace TradeScribe
             return sb.ToString();
         }
 
-        /// Loads this campaign's files the first time it is needed (or when another save is loaded).
+        /// Loads this campaign's files when needed, and notices when an earlier save has been loaded.
         public static void EnsureLoaded()
         {
             string id = Campaign.Current.UniqueGameId ?? "campaign";
-            if (id == _gameId) return;
-            _gameId = id; Points.Clear(); Rumours.Clear(); RumourKeys.Clear(); Trades.Clear(); Basis.Clear();
+            if (id != _gameId) { _gameId = id; Load(); }
+            double now = NowHours;
+            if (now + 0.01 >= _maxHour) return;
+            // The clock went backwards: an earlier save was loaded. Your character has not yet seen anything
+            // logged after this moment, so mark the files and forget it. Nothing is deleted from the files.
+            int before = Points.Count + Rumours.Count + Trades.Count;
+            string mark = Rewind + "," + now.ToString("0.###", Inv) + Environment.NewLine;
+            foreach (string path in new[] { ObsPath, RumPath, TradePath })
+                if (File.Exists(path)) File.AppendAllText(path, mark, new UTF8Encoding(false));
+            Load();
+            int dropped = before - (Points.Count + Rumours.Count + Trades.Count);
+            TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage(
+                "TradeScribe: an earlier save was loaded. Forgot " + dropped + " prices, rumours and trades from after this date.",
+                TaleWorlds.Library.Color.FromUint(0xFFC9A227)));
+        }
+
+        private static double Hour(List<string> f, int index, int day) => f.Count > index && f[index] != "" ? D(f[index]) : day * 24.0;
+
+        /// Rebuilds everything from the files. A REWIND line drops whatever came before it but is dated after it.
+        private static void Load()
+        {
+            Points.Clear(); Rumours.Clear(); RumourKeys.Clear(); Trades.Clear(); Basis.Clear(); _maxHour = 0;
+            var obs = new List<Obs>();
             if (File.Exists(ObsPath))
-            {
-                var group = new List<Obs>(); long snap = long.MinValue;
                 foreach (string line in File.ReadAllLines(ObsPath).Skip(1))
                 {
-                    List<string> f = Csv.Parse(line); if (f.Count < 13) continue;
-                    var o = new Obs { Snap = L(f[0]), Day = I(f[1], 0), Town = f[2], Good = f[3], Buy = I(f[4], -1), Sell = I(f[5], -1), Stock = I(f[6], 0),
+                    List<string> f = Csv.Parse(line);
+                    if (f.Count >= 2 && f[0] == Rewind) { double h = D(f[1]); obs.RemoveAll(o => o.Hour > h); continue; }
+                    if (f.Count < 13) continue;
+                    var o2 = new Obs { Snap = L(f[0]), Day = I(f[1], 0), Town = f[2], Good = f[3], Buy = I(f[4], -1), Sell = I(f[5], -1), Stock = I(f[6], 0),
                         Type = f[7], Date = f[8], Held = I(f[9], 0), TownId = f[10], ItemId = f[11], Weight = F(f[12]) };
-                    if (o.Snap != snap && group.Count > 0) { Apply(group); group = new List<Obs>(); }
-                    snap = o.Snap; group.Add(o);
+                    o2.Hour = Hour(f, 13, o2.Day); obs.Add(o2);
                 }
-                if (group.Count > 0) Apply(group);
+            var group = new List<Obs>(); long snap = long.MinValue;
+            foreach (Obs o in obs)
+            {
+                if (o.Snap != snap && group.Count > 0) { Apply(group); group = new List<Obs>(); }
+                snap = o.Snap; group.Add(o); _maxHour = Math.Max(_maxHour, o.Hour);
             }
-            LoadTrades();
+            if (group.Count > 0) Apply(group);
+
+            var trades = new List<Trade>();
+            if (File.Exists(TradePath))
+                foreach (string line in File.ReadAllLines(TradePath).Skip(1))
+                {
+                    List<string> f = Csv.Parse(line);
+                    if (f.Count >= 2 && f[0] == Rewind) { double h = D(f[1]); trades.RemoveAll(x => x.Hour > h); continue; }
+                    if (f.Count < 12) continue;
+                    var t = new Trade { Day = I(f[0], 0), Date = f[1], Town = f[2], Action = f[3], Units = I(f[4], 0), Good = f[5], Total = I(f[6], 0), TownId = f[10], ItemId = f[11] };
+                    t.Hour = Hour(f, 12, t.Day); trades.Add(t);
+                }
+            foreach (Trade t in trades) { Book(t); Trades.Add(t); _maxHour = Math.Max(_maxHour, t.Hour); }
+
+            var rumours = new List<Rumour>();
             if (File.Exists(RumPath))
                 foreach (string line in File.ReadAllLines(RumPath).Skip(1))
                 {
-                    List<string> f = Csv.Parse(line); if (f.Count < 8) continue;
+                    List<string> f = Csv.Parse(line);
+                    if (f.Count >= 2 && f[0] == Rewind) { double h = D(f[1]); rumours.RemoveAll(x => x.Hour > h); continue; }
+                    if (f.Count < 8) continue;
                     var r = new Rumour { DaySeen = I(f[0], 0), Town = f[1], Good = f[2], Buy = I(f[3], 0), Sell = I(f[4], 0), EndDay = I(f[5], 0), TownId = f[6], ItemId = f[7] };
-                    if (RumourKeys.Add(r.Key)) Rumours.Add(r);
+                    r.Hour = Hour(f, 8, r.DaySeen); rumours.Add(r);
                 }
-        }
-
-        private static void LoadTrades()
-        {
-            if (!File.Exists(TradePath)) return;
-            foreach (string line in File.ReadAllLines(TradePath).Skip(1))
-            {
-                List<string> f = Csv.Parse(line); if (f.Count < 12) continue;
-                var t = new Trade { Day = I(f[0], 0), Date = f[1], Town = f[2], Action = f[3], Units = I(f[4], 0), Good = f[5], Total = I(f[6], 0), TownId = f[10], ItemId = f[11] };
-                Book(t); Trades.Add(t);
-            }
+            foreach (Rumour r in rumours) if (RumourKeys.Add(r.Key)) { Rumours.Add(r); _maxHour = Math.Max(_maxHour, r.Hour); }
         }
 
         /// Works out the profit on a sale against what the same goods cost, and keeps the running cost of what is still held.
@@ -131,7 +164,8 @@ namespace TradeScribe
                 Book(t); Trades.Add(t);
                 sb.AppendLine(string.Join(",", t.Day.ToString(Inv), Csv.Q(t.Date), Csv.Q(t.Town), t.Action, t.Units.ToString(Inv), Csv.Q(t.Good), t.Total.ToString(Inv),
                     (t.Units > 0 ? (double)t.Total / t.Units : 0).ToString("0.#", Inv), t.Action == "Sold" && t.Matched > 0 ? t.Profit.ToString(Inv) : "",
-                    t.Action == "Sold" ? t.Matched.ToString(Inv) : "", Csv.Q(t.TownId), Csv.Q(t.ItemId)));
+                    t.Action == "Sold" ? t.Matched.ToString(Inv) : "", Csv.Q(t.TownId), Csv.Q(t.ItemId), t.Hour.ToString("0.###", Inv)));
+                _maxHour = Math.Max(_maxHour, t.Hour);
             }
             File.AppendAllText(TradePath, sb.ToString(), new UTF8Encoding(false));
         }
@@ -147,9 +181,9 @@ namespace TradeScribe
             foreach (Obs o in rows)
                 sb.AppendLine(string.Join(",", o.Snap.ToString(Inv), o.Day.ToString(Inv), Csv.Q(o.Town), Csv.Q(o.Good), N(o.Buy), N(o.Sell),
                     o.Stock > 0 ? o.Stock.ToString(Inv) : "", Csv.Q(o.Type), Csv.Q(o.Date), o.Held > 0 ? o.Held.ToString(Inv) : "",
-                    Csv.Q(o.TownId), Csv.Q(o.ItemId), o.Weight.ToString("0.###", Inv)));
+                    Csv.Q(o.TownId), Csv.Q(o.ItemId), o.Weight.ToString("0.###", Inv), o.Hour.ToString("0.###", Inv)));
             File.AppendAllText(ObsPath, sb.ToString(), new UTF8Encoding(false));
-            Apply(rows);
+            Apply(rows); _maxHour = Math.Max(_maxHour, rows[0].Hour);
         }
 
         private static void Apply(List<Obs> rows)
@@ -178,12 +212,13 @@ namespace TradeScribe
             foreach (TradeRumor tr in beh.TradeRumors)
             {
                 if (tr == null || tr.Settlement == null || tr.ItemCategory == null) continue;
-                var r = new Rumour { DaySeen = Today, EndDay = (int)tr.RumorEndTime.ToDays, Buy = tr.BuyPrice, Sell = tr.SellPrice,
+                var r = new Rumour { Hour = NowHours, DaySeen = Today, EndDay = (int)tr.RumorEndTime.ToDays, Buy = tr.BuyPrice, Sell = tr.SellPrice,
                     TownId = tr.Settlement.StringId, Town = tr.Settlement.Name.ToString(), ItemId = tr.ItemCategory.StringId, Good = tr.ItemCategory.Name.ToString() };
                 if (!RumourKeys.Add(r.Key)) continue;
                 Rumours.Add(r); added++;
                 sb.AppendLine(string.Join(",", r.DaySeen.ToString(Inv), Csv.Q(r.Town), Csv.Q(r.Good), r.Buy.ToString(Inv), r.Sell.ToString(Inv),
-                    r.EndDay.ToString(Inv), Csv.Q(r.TownId), Csv.Q(r.ItemId)));
+                    r.EndDay.ToString(Inv), Csv.Q(r.TownId), Csv.Q(r.ItemId), r.Hour.ToString("0.###", Inv)));
+                _maxHour = Math.Max(_maxHour, r.Hour);
             }
             if (added > 0)
             {
@@ -202,6 +237,7 @@ namespace TradeScribe
         private static string N(int v) => v >= 0 ? v.ToString(Inv) : "";
         private static int I(string s, int d) => int.TryParse(s, NumberStyles.Integer, Inv, out int v) ? v : d;
         private static long L(string s) => long.TryParse(s, NumberStyles.Integer, Inv, out long v) ? v : 0;
+        private static double D(string s) => double.TryParse(s, NumberStyles.Float, Inv, out double v) ? v : 0;
         private static float F(string s) => float.TryParse(s, NumberStyles.Float, Inv, out float v) ? v : 0f;
     }
 

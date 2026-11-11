@@ -73,6 +73,7 @@ namespace TradeScribe
             string townId = place != null ? place.StringId : (logic.OtherParty != null ? "party:" + logic.OtherParty.Name : "unknown");
             string town = place != null ? place.Name.ToString() : (logic.OtherParty != null ? logic.OtherParty.Name.ToString() : "Unknown trader");
             _townId = townId; _town = town;
+            Ledger.EnsureLoaded();
             long snap = DateTime.UtcNow.Ticks; int day = Ledger.Today; string date = CampaignTime.Now.ToString();
 
             var rows = new Dictionary<string, Obs>(); var order = new List<Obs>();
@@ -130,7 +131,7 @@ namespace TradeScribe
             foreach (ValueTuple<ItemRosterElement, int> x in list)
             {
                 EquipmentElement eq = x.Item1.EquipmentElement; if (eq.Item == null || x.Item1.Amount <= 0) continue;
-                trades.Add(new Trade { Day = Ledger.Today, Date = CampaignTime.Now.ToString(), TownId = _townId, Town = _town, Action = action,
+                trades.Add(new Trade { Hour = Ledger.NowHours, Day = Ledger.Today, Date = CampaignTime.Now.ToString(), TownId = _townId, Town = _town, Action = action,
                     ItemId = eq.ItemModifier == null ? eq.Item.StringId : eq.Item.StringId + "+" + eq.ItemModifier.StringId,
                     Good = eq.GetModifiedItemName().ToString(), Units = x.Item1.Amount, Total = unitPrices ? x.Item2 * x.Item1.Amount : x.Item2 });
             }
@@ -145,7 +146,7 @@ namespace TradeScribe
             if (!rows.TryGetValue(id, out Obs o))
             {
                 string type = it.IsTradeGood ? (it.IsFood ? "Food" : "Trade good") : (it.IsAnimal ? "Animal" : it.ItemType.ToString());
-                o = new Obs { Snap = snap, Day = day, Date = date, TownId = townId, Town = town, ItemId = id, Good = name, Type = type, Weight = it.Weight };
+                o = new Obs { Snap = snap, Hour = Ledger.NowHours, Day = day, Date = date, TownId = townId, Town = town, ItemId = id, Good = name, Type = type, Weight = it.Weight };
                 rows[id] = o; order.Add(o);
             }
             return o;

@@ -26,6 +26,10 @@ Rumours are the game's own: Bannerlord gives you a town's prices as rumours when
 one rumour a day from a random town, and shows them in item tooltips. TradeScribe copies that list
 and keeps it; it does not create rumours.
 
+Loading an earlier save makes the ledger forget everything dated after that save: prices, rumours
+and trades from days your character has not lived yet. The rows stay in the CSV files behind a
+`REWIND` line, but the game no longer uses them.
+
 ## Using it
 
 - Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
