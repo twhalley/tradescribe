@@ -50,8 +50,8 @@ pinned notes and trades from days your character has not lived yet. The rows sta
   good and by town, Pinned notes, Settings.
 - **Settings:** hide runs longer than a chosen distance, rank runs by profit per distance, and
   choose how old a rumour may be before run suggestions ignore it (3 days by default).
-- Long lists are split into pages. **Next page** moves on; **Options** offers pinning, the previous
-  page and the way back to the menu.
+- Long lists are split into pages. The tick button opens **Options**: next and previous page,
+  pinning, and the way back to the menu. The **X** (Close) on any pop-up closes the ledger.
 - To pin: **Options**, then **Pin something on this page**, then tick one or more entries. To
   remove a note, open **Pinned notes** and use **Options** there.
 - Each sell price is marked **seen** (you saw it), **rumour** (from a live rumour) or **estimate**

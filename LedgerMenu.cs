@@ -95,39 +95,43 @@ namespace TradeScribe
             bool more = page < pages - 1;
             Action<int> go = p => _pending = () => ShowPages(title, intro, entries, empty, footer, per, p, pinned);
             InformationManager.ShowInquiry(new InquiryData(pages > 1 ? title + " (page " + (page + 1) + " of " + pages + ")" : title, sb.ToString(),
-                true, true, more ? "Next page" : "Menu", entries.Count == 0 ? "Close" : "Options",
-                () => { if (more) go(page + 1); else _pending = ShowMain; },
-                () => { if (entries.Count > 0) _pending = () => ShowOptions(shown, page, pinned, go); }), true);
+                true, true, entries.Count == 0 ? "Menu" : more ? "Next page / options" : "Options", "Close",
+                () => { if (entries.Count == 0) _pending = ShowMain; else _pending = () => ShowOptions(shown, page, pinned, go, more); },
+                null), true);
         }
 
-        private static void ShowOptions(List<Entry> shown, int page, bool pinned, Action<int> go)
+        /// The tick on a page leads here. The X on any pop-up closes the ledger.
+        private static void ShowOptions(List<Entry> shown, int page, bool pinned, Action<int> go, bool more)
         {
             var items = new List<InquiryElement>
             {
+                new InquiryElement("next", "Next page", null, more, "This is the last page"),
                 new InquiryElement("pin", pinned ? "Unpin notes on this page" : "Pin something on this page", null),
                 new InquiryElement("prev", "Previous page", null, page > 0, "This is the first page"),
                 new InquiryElement("first", "First page", null, page > 0, "This is the first page"),
                 new InquiryElement("menu", "Back to the ledger menu", null),
+                new InquiryElement("stay", "Back to this page", null),
             };
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Options",
                 pinned ? "Unpinned notes are gone for good." : "A pinned note keeps today's wording and prices. It is never refreshed and never ages out.",
-                items, true, 1, 1, "Choose", "Back",
+                items, true, 1, 1, "Choose", "Close",
                 picked =>
                 {
                     string id = picked != null && picked.Count > 0 ? picked[0].Identifier as string : null;
-                    if (id == "pin") _pending = () => PickPins(shown, page, pinned, go);
+                    if (id == "next") go(page + 1);
+                    else if (id == "pin") _pending = () => PickPins(shown, page, pinned, go);
                     else if (id == "prev") go(page - 1);
                     else if (id == "first") go(0);
                     else if (id == "menu") _pending = ShowMain;
                     else go(page);
-                }, _ => go(page), "", false), true);
+                }, null, "", false), true);
         }
 
         private static void PickPins(List<Entry> shown, int page, bool pinned, Action<int> go)
         {
             List<InquiryElement> items = shown.Select((e, i) => new InquiryElement(i, Brief(e), null)).ToList();
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(pinned ? "Unpin notes" : "Pin to your notes",
-                "Tick one or more.", items, true, 1, items.Count, pinned ? "Unpin" : "Pin", "Back",
+                "Tick one or more.", items, true, 1, items.Count, pinned ? "Unpin" : "Pin", "Close",
                 picked =>
                 {
                     List<Entry> chosen = (picked ?? new List<InquiryElement>()).Select(p => shown[(int)p.Identifier]).ToList();
@@ -143,7 +147,7 @@ namespace TradeScribe
                         Say(added == 0 ? "Already pinned." : "Pinned " + added + ". Find them under Pinned notes.");
                         go(page);
                     }
-                }, _ => go(page), "", false), true);
+                }, null, "", false), true);
         }
 
         private static string Brief(Entry e)
@@ -209,14 +213,14 @@ namespace TradeScribe
                 return;
             }
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Which workshop suits a town", "Pick a town whose prices you have seen.",
-                items, true, 1, 1, "Show", "Back",
+                items, true, 1, 1, "Show", "Close",
                 picked =>
                 {
                     if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
                     string id = picked[0].Identifier as string; string name = picked[0].Title.Replace(" (you are here)", "");
                     _pending = () => ShowPages("Workshops for " + name, null, Workshops.Suits(id, name),
                         "No workshop types found.", Workshops.SuitFooter, 4);
-                }, _ => { _pending = ShowMain; }, "", true), true);
+                }, null, "", true), true);
         }
 
         private static void ShowSummary()
@@ -250,9 +254,10 @@ namespace TradeScribe
                 new InquiryElement("dist", "Longest run: " + (Settings.MaxDistance > 0 ? "distance " + Settings.MaxDistance : "no limit"), null),
                 new InquiryElement("rank", "Rank runs by: " + (Settings.PerDistance ? "profit per distance" : "trip profit") + " (choose to switch)", null),
                 new InquiryElement("rum", "Use rumours up to: " + (Settings.RumourDays == 0 ? "never (seen prices and estimates only)" : Settings.RumourDays + " days old"), null),
+                new InquiryElement("menu", "Back to the ledger menu", null),
             };
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Settings", "These shape the run suggestions. The rumour log itself keeps everything.",
-                items, true, 1, 1, "Change", "Back",
+                items, true, 1, 1, "Change", "Close",
                 picked =>
                 {
                     string id = picked != null && picked.Count > 0 ? picked[0].Identifier as string : null;
@@ -261,7 +266,7 @@ namespace TradeScribe
                     else if (id == "rum") _pending = () => PickNumber("Use rumours up to", "Old rumours can be well off. Seen prices are not affected.",
                         new[] { 0, 1, 2, 3, 5, 10 }, v => v == 0 ? "Never use rumours for runs" : v + (v == 1 ? " day old" : " days old"), v => Settings.RumourDays = v);
                     else _pending = ShowMain;
-                }, _ => { _pending = ShowMain; }, "", false), true);
+                }, null, "", false), true);
         }
 
         private static void PickDistance()
@@ -277,12 +282,12 @@ namespace TradeScribe
         private static void PickNumber(string title, string desc, int[] options, Func<int, string> label, Action<int> set)
         {
             List<InquiryElement> items = options.Select(v => new InquiryElement(v, label(v), null)).ToList();
-            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(title, desc, items, true, 1, 1, "Set", "Back",
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(title, desc, items, true, 1, 1, "Set", "Close",
                 picked =>
                 {
                     if (picked != null && picked.Count > 0) { set((int)picked[0].Identifier); Settings.Save(); }
                     _pending = ShowSettings;
-                }, _ => { _pending = ShowSettings; }, "", false), true);
+                }, null, "", false), true);
         }
 
         private static void ShowGoods()
@@ -291,13 +296,13 @@ namespace TradeScribe
                 .Where(p => p.Type == "Food" || p.Type == "Trade good" || p.Type == "Animal" || p.Type == "Horse").OrderBy(p => p.Good).ToList();
             if (goods.Count == 0) { ShowPages("Prices for one good", null, new List<Entry>(), "No goods logged yet. Open a trade screen.", null, 10); return; }
             List<InquiryElement> items = goods.Select(p => new InquiryElement(p.ItemId, p.Good, null)).ToList();
-            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Prices for one good", "Pick a good.", items, true, 1, 1, "Show", "Back",
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Prices for one good", "Pick a good.", items, true, 1, 1, "Show", "Close",
                 picked =>
                 {
                     if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
                     string id = picked[0].Identifier as string; string title = picked[0].Title;
                     _pending = () => ShowPages(title, null, GoodEntries(id, title), "No price known for it in the last " + Runs.MaxAgeDays + " days.", null, 10);
-                }, _ => { _pending = ShowMain; }, "", true), true);
+                }, null, "", true), true);
         }
 
         private static List<Entry> GoodEntries(string itemId, string good)
@@ -331,7 +336,7 @@ namespace TradeScribe
                 .Select(p => new InquiryElement(p.Key, p.Value + (p.Key == here ? " (you are here)" : ""), null)).ToList();
             string fromName = fromId == null ? null : places.Where(p => p.Key == fromId).Select(p => p.Value).FirstOrDefault();
             MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Plan a run",
-                fromId == null ? "Pick where you will buy." : "Buying in " + fromName + ". Pick where you will sell.", items, true, 1, 1, "Next", "Back",
+                fromId == null ? "Pick where you will buy." : "Buying in " + fromName + ". Pick where you will sell.", items, true, 1, 1, "Next", "Close",
                 picked =>
                 {
                     if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
@@ -345,7 +350,7 @@ namespace TradeScribe
                         ShowPages(fromName + " and " + toName, null, entries, "Nothing known to be worth carrying either way.",
                             "Buy prices are ones you saw on a trade screen there. Sell prices marked estimate are the least reliable; old rumours can be well off.", 4);
                     };
-                }, _ => { _pending = ShowMain; }, "", true), true);
+                }, null, "", true), true);
         }
 
         private static void ShowRumours()
