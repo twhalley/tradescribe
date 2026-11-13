@@ -155,12 +155,13 @@ namespace TradeScribe
                     o2.Hour = Hour(f, 13, o2.Day); obs.Add(o2);
                 }
             var group = new List<Obs>(); long snap = long.MinValue;
+            string lastTown = null; double lastHour = -1;
             foreach (Obs o in obs)
             {
-                if (o.Snap != snap && group.Count > 0) { Apply(group); group = new List<Obs>(); }
+                if (o.Snap != snap && group.Count > 0) { ApplyGroup(group, ref lastTown, ref lastHour); group = new List<Obs>(); }
                 snap = o.Snap; group.Add(o); _maxHour = Math.Max(_maxHour, o.Hour);
             }
-            if (group.Count > 0) Apply(group);
+            if (group.Count > 0) ApplyGroup(group, ref lastTown, ref lastHour);
 
             var trades = new List<Trade>();
             if (File.Exists(TradePath))
@@ -235,13 +236,28 @@ namespace TradeScribe
             Apply(rows); _maxHour = Math.Max(_maxHour, rows[0].Hour);
         }
 
-        private static void Apply(List<Obs> rows)
+        /// A second view of the same town at the same moment is a reopened screen, or the view v2.5.0 wrote after
+        /// a deal. Either can show buy-back prices for goods traded that visit (the game offers them back at the price
+        /// you just got), which look like a sell price at or near the buy price. Those rows are ignored.
+        private static void ApplyGroup(List<Obs> rows, ref string lastTown, ref double lastHour)
+        {
+            bool repeat = rows[0].TownId == lastTown && Math.Abs(rows[0].Hour - lastHour) < 0.0005;
+            lastTown = rows[0].TownId; lastHour = rows[0].Hour;
+            Apply(rows, repeat);
+        }
+
+        private static bool BuyBack(Obs o) => o.Buy > 0 && o.Sell > 0 && o.Sell >= 0.92 * o.Buy;
+
+        private static void Apply(List<Obs> rows, bool repeat = false)
         {
             // The screen showed the trader's whole stock, so anything not listed is no longer for sale there.
             string town = rows[0].TownId;
-            foreach (PricePoint p in Points.Values) if (p.TownId == town) { p.Buy = -1; p.Stock = 0; }
+            var keep = new HashSet<string>();
+            if (repeat) foreach (Obs o in rows) if (BuyBack(o)) keep.Add(o.ItemId);
+            foreach (PricePoint p in Points.Values) if (p.TownId == town && !keep.Contains(p.ItemId)) { p.Buy = -1; p.Stock = 0; }
             foreach (Obs o in rows)
             {
+                if (keep.Contains(o.ItemId)) continue;
                 string key = o.TownId + "|" + o.ItemId;
                 if (!Points.TryGetValue(key, out PricePoint p))
                     Points[key] = p = new PricePoint { TownId = o.TownId, ItemId = o.ItemId };

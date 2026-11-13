@@ -25,8 +25,7 @@ namespace TradeScribe
         private int _goldAtOpen;
         private static string _townId, _town;
         private List<ValueTuple<ItemRosterElement, int>> _bought, _sold;
-        private List<Obs> _latest;      // the screen as it stood after the latest buy or sell
-        private int _moved = -1;
+        private static List<Obs> _openRows;    // the trade screen as it was when opened
 
         protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
         {
@@ -59,34 +58,20 @@ namespace TradeScribe
                 }
                 if (!ReferenceEquals(logic, _lastLogic))
                 {
-                    _lastLogic = logic; _tracking = logic.IsTrading; _bought = null; _sold = null; _latest = null; _moved = -1;
+                    _lastLogic = logic; _tracking = logic.IsTrading; _bought = null; _sold = null; _openRows = null;
                     if (!_tracking) return;
                     _goldAtOpen = Hero.MainHero.Gold;
                     Snapshot(logic);
                 }
-                if (_tracking)
-                {
-                    _bought = logic.GetBoughtItems(); _sold = logic.GetSoldItems();
-                    // Your own buying and selling moves the prices on the screen. Keep the latest view so the
-                    // ledger can be brought up to date when the deal is confirmed.
-                    int moved = Sum(_bought, false) * 31 + Sum(_sold, false) + Amount(_bought) * 7919 + Amount(_sold) * 104729;
-                    if (moved != _moved) { _moved = moved; _latest = (_bought.Count + _sold.Count) > 0 ? BuildRows(logic, _sold) : null; }
-                }
+                if (_tracking) { _bought = logic.GetBoughtItems(); _sold = logic.GetSoldItems(); }
             }
             catch (Exception e) { Ledger.LogError(e); }
         }
 
-        private static int Amount(List<ValueTuple<ItemRosterElement, int>> list)
-        {
-            int n = 0; if (list == null) return 0;
-            foreach (ValueTuple<ItemRosterElement, int> x in list) n += x.Item1.Amount;
-            return n;
-        }
-
         private static string Id(EquipmentElement eq) => eq.ItemModifier == null ? eq.Item.StringId : eq.Item.StringId + "+" + eq.ItemModifier.StringId;
 
-        /// Everything on the trade screen right now. For goods just sold, also what the trader would pay for one more.
-        private static List<Obs> BuildRows(InventoryLogic logic, List<ValueTuple<ItemRosterElement, int>> sold)
+        /// Everything on the trade screen right now.
+        private static List<Obs> BuildRows(InventoryLogic logic)
         {
             Settlement place = logic.CurrentSettlementComponent?.Settlement ?? Settlement.CurrentSettlement;
             string townId = place != null ? place.StringId : (logic.OtherParty != null ? "party:" + logic.OtherParty.Name : "unknown");
@@ -108,22 +93,12 @@ namespace TradeScribe
                 Obs o = Row(rows, order, el, snap, day, date, townId, town);
                 o.Held += el.Amount; o.Sell = logic.GetItemPrice(el.EquipmentElement, false);
             }
-            if (sold != null)
-            {
-                var soldIds = new HashSet<string>();
-                foreach (ValueTuple<ItemRosterElement, int> x in sold) if (x.Item1.EquipmentElement.Item != null) soldIds.Add(Id(x.Item1.EquipmentElement));
-                foreach (ItemRosterElement el in logic.GetElementsInRoster(InventoryLogic.InventorySide.OtherInventory))
-                {
-                    if (el.EquipmentElement.Item == null || el.Amount <= 0 || !soldIds.Contains(Id(el.EquipmentElement))) continue;
-                    if (rows.TryGetValue(Id(el.EquipmentElement), out Obs o) && o.Sell <= 0) o.Sell = logic.GetItemPrice(el.EquipmentElement, false);
-                }
-            }
             return order;
         }
 
         private static void Snapshot(InventoryLogic logic)
         {
-            List<Obs> order = BuildRows(logic, null);
+            List<Obs> order = BuildRows(logic); _openRows = order;
             string townId = _townId, town = _town;
             Ledger.AddSnapshot(order);
             int rumours = Ledger.SyncRumours();
@@ -147,12 +122,44 @@ namespace TradeScribe
             var trades = new List<Trade>();
             Collect(trades, _bought, "Bought", unitPrices); Collect(trades, _sold, "Sold", unitPrices);
             Ledger.AddTrades(trades);
-            if (_latest != null) Ledger.AddSnapshot(_latest);    // prices as they stood after your own trades
+            if (_openRows != null && _openRows.Count > 0) Ledger.AddSnapshot(AfterTrades(_openRows, trades));
             int profit = 0, known = 0;
             foreach (Trade t in trades) if (t.Action == "Sold" && t.Matched > 0) { profit += t.Profit; known++; }
             string msg = "TradeScribe: recorded " + trades.Count + " trade" + (trades.Count == 1 ? "" : "s") + " in " + _town + ".";
             if (known > 0) msg += " Profit on goods you bought earlier: " + (profit >= 0 ? "+" : "") + profit + ".";
             InformationManager.DisplayMessage(new InformationMessage(msg, Color.FromUint(0xFFC9A227)));
+        }
+
+        /// The opening prices, moved by your own deal. The screen cannot show this directly: goods you just sold
+        /// are offered back at the price you sold them for. So the next price is worked out from what you were paid:
+        /// if the first unit sold for p and the average was a, prices slid about 2(p - a) over the lot.
+        private static List<Obs> AfterTrades(List<Obs> open, List<Trade> trades)
+        {
+            long snap = DateTime.UtcNow.Ticks; var res = new List<Obs>();
+            foreach (Obs o in open)
+            {
+                var n = new Obs { Snap = snap, Hour = o.Hour + 0.001, Day = o.Day, Date = o.Date, TownId = o.TownId, Town = o.Town, ItemId = o.ItemId,
+                    Good = o.Good, Type = o.Type, Weight = o.Weight, Buy = o.Buy, Sell = o.Sell, Stock = o.Stock, Held = o.Held };
+                foreach (Trade t in trades)
+                {
+                    if (t.ItemId != o.ItemId || t.Units <= 0) continue;
+                    double avg = (double)t.Total / t.Units;
+                    if (t.Action == "Sold" && n.Sell > 0)
+                    {
+                        int next = Math.Max(1, (int)Math.Round(Math.Min(avg, 2 * avg - n.Sell)));
+                        if (n.Buy > 0) n.Buy = Math.Max(1, (int)Math.Round((double)n.Buy * next / n.Sell));
+                        n.Sell = next; n.Stock += t.Units; n.Held = Math.Max(0, n.Held - t.Units);
+                    }
+                    else if (t.Action == "Bought" && n.Buy > 0)
+                    {
+                        int next = (int)Math.Round(Math.Max(avg, 2 * avg - n.Buy));
+                        if (n.Sell > 0) n.Sell = Math.Max(1, (int)Math.Round((double)n.Sell * next / n.Buy));
+                        n.Buy = next; n.Stock = Math.Max(0, n.Stock - t.Units); n.Held += t.Units;
+                    }
+                }
+                res.Add(n);
+            }
+            return res;
         }
 
         private static int Sum(List<ValueTuple<ItemRosterElement, int>> list, bool unit)
