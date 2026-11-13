@@ -12,7 +12,7 @@ namespace TradeScribe
 
     public class Run
     {
-        public string ItemId, Good; public Quote Buy, Sell; public float Weight, Distance = -1f;
+        public string ItemId, Good, Type = ""; public Quote Buy, Sell; public float Weight, Distance = -1f;
         public int Each, Units, Trip;
         public string Line()
         {
@@ -28,10 +28,11 @@ namespace TradeScribe
         public string Block()
         {
             string s = Good + ": +" + Fmt.N(Each) + " each" + (Units > 0 ? ", about +" + Fmt.N(Trip) + " for " + Units : "") + "\n"
-                + "    Buy in " + Buy.Town + " at " + Fmt.N(Buy.Price) + " (" + Buy.Stock + " in stock, seen " + Fmt.Age(Ledger.Today - Buy.Day) + ")\n"
-                + "    Sell in " + Sell.Town + " for " + Fmt.N(Sell.Price) + " (" + SellBasis() + ")";
+                + "    Buy in " + Runs.Label(Buy.TownId, Buy.Town) + " at " + Fmt.N(Buy.Price) + " (" + Buy.Stock + " in stock, seen " + Fmt.Age(Ledger.Today - Buy.Day) + ")\n"
+                + "    Sell in " + Runs.Label(Sell.TownId, Sell.Town) + " for " + Fmt.N(Sell.Price) + " (" + SellBasis() + ")";
             if (Distance >= 0f) s += "\n    Distance " + Distance.ToString("0")
                 + (Units > 0 && Distance > 1f ? " (+" + (Trip / Distance).ToString("0.#") + " per unit of distance)" : "");
+            string warn = Carry.HorseWarning(Type); if (warn != null) s += "\n    " + warn;
             return s;
         }
     }
@@ -46,9 +47,29 @@ namespace TradeScribe
     public static class Runs
     {
         public const int MaxAgeDays = 20;
-        private static readonly HashSet<string> TradeTypes = new HashSet<string> { "Food", "Trade good", "Animal", "Horse" };
+        public static readonly HashSet<string> TradeTypes = new HashSet<string> { "Food", "Trade good", "Animal", "Horse" };
 
-        private static bool Walks(string type) => type == "Horse" || type == "Animal";
+        public static string TypeOf(TaleWorlds.Core.ItemObject it) =>
+            it.IsTradeGood ? (it.IsFood ? "Food" : "Trade good") : (it.IsAnimal ? "Animal" : it.ItemType.ToString());
+
+        /// A place name, marked when it is a village.
+        public static string Label(string id, string name)
+        {
+            try { Settlement s = Settlement.Find(id); return s != null && s.IsVillage ? name + " (village)" : name; } catch { return name; }
+        }
+
+        /// Map distance from where you are, or the place you last visited.
+        public static float DistanceFromParty(string toId)
+        {
+            try
+            {
+                Settlement at = MobileParty.MainParty.CurrentSettlement ?? MobileParty.MainParty.LastVisitedSettlement;
+                return at == null ? -1f : Distance(at.StringId, toId);
+            }
+            catch { return -1f; }
+        }
+
+        public static bool Walks(string type) => type == "Horse" || type == "Animal";
 
         /// Share of the buy price a trader pays you, taken from towns where both prices were seen on the same day.
         /// Horses and livestock are measured separately from goods: traders pay far less of the asking price for them.
@@ -120,7 +141,7 @@ namespace TradeScribe
                     {
                         if (s.TownId == b.TownId || s.Price <= b.Price || TooFar(b.TownId, s.TownId)) continue;
                         if (best == null || s.Price - b.Price > best.Each)
-                            best = new Run { ItemId = g.Key, Good = g.First().Good, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
+                            best = new Run { ItemId = g.Key, Good = g.First().Good, Type = g.First().Type, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
                     }
                 if (best == null) continue;
                 Size(best, g.First().Type, cash, free);
@@ -134,7 +155,7 @@ namespace TradeScribe
         {
             PricePoint p = Ledger.Points.Values.FirstOrDefault(x => x.ItemId == itemId);
             if (p == null || b == null || s == null || s.Price <= b.Price) return null;
-            var run = new Run { ItemId = itemId, Good = p.Good, Weight = p.Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
+            var run = new Run { ItemId = itemId, Good = p.Good, Type = p.Type, Weight = p.Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
             Size(run, p.Type, Hero.MainHero != null ? Hero.MainHero.Gold : 0, FreeWeight());
             return run;
         }
@@ -159,7 +180,7 @@ namespace TradeScribe
                 Quote b = BuyQuotes(g.Key).FirstOrDefault(q => q.TownId == fromId);
                 Quote s = SellQuotes(g.Key).FirstOrDefault(q => q.TownId == toId);
                 if (b == null || s == null || s.Price <= b.Price) continue;
-                var run = new Run { ItemId = g.Key, Good = g.First().Good, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
+                var run = new Run { ItemId = g.Key, Good = g.First().Good, Type = g.First().Type, Weight = g.First().Weight, Buy = b, Sell = s, Each = s.Price - b.Price };
                 Size(run, g.First().Type, cash, free);
                 runs.Add(run);
             }
@@ -172,7 +193,7 @@ namespace TradeScribe
             var d = new Dictionary<string, string>();
             foreach (PricePoint p in Ledger.Points.Values) d[p.TownId] = p.Town;
             foreach (Rumour r in Ledger.Rumours) if (RumourUsable(r) && !d.ContainsKey(r.TownId)) d[r.TownId] = r.Town;
-            return d.OrderBy(k => k.Value).ToList();
+            return d.Select(k => new KeyValuePair<string, string>(k.Key, Label(k.Key, k.Value))).OrderBy(k => k.Value).ToList();
         }
 
         private static float FreeWeight()

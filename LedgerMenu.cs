@@ -11,7 +11,7 @@ using TaleWorlds.Library;
 namespace TradeScribe
 {
     /// One numbered item on a page. Pin is the text kept if the player pins it (defaults to Text).
-    public class Entry { public string Header, Text, Pin; public object Tag; }
+    public class Entry { public string Header, Text, Pin, ItemId; public object Tag; }
 
     public static class LedgerMenu
     {
@@ -36,11 +36,14 @@ namespace TradeScribe
             int shops = Workshops.Count;
             var items = new List<InquiryElement>
             {
+                new InquiryElement("carry", "What I'm carrying", null),
+                new InquiryElement("plan", "Selling plan for one good", null),
                 new InquiryElement("runs", "Best trade runs", null),
                 new InquiryElement("here", "What to buy here", null, Settlement.CurrentSettlement != null, "Only available inside a settlement"),
                 new InquiryElement("route", "Plan a run between two places", null),
                 new InquiryElement("shops", "My workshops (" + shops + ")", null),
                 new InquiryElement("suit", "Which workshop suits a town", null),
+                new InquiryElement("caravans", "My caravans (" + Carry.CaravanCount + ")", null),
                 new InquiryElement("good", "Prices for one good", null),
                 new InquiryElement("rumours", "Rumour log", null),
                 new InquiryElement("trades", "My trades and profit", null),
@@ -62,6 +65,12 @@ namespace TradeScribe
                     else if (id == "rumours") _pending = ShowRumours;
                     else if (id == "pins") _pending = () => ShowPinned(0);
                     else if (id == "suit") _pending = PickWorkshopTown;
+                    else if (id == "carry") _pending = () => ShowPages("What I'm carrying", null, Carry.HoldingEntries(),
+                        "You carry no trade goods, food, livestock or horses.", "Plans allow for prices falling as you sell. Cost is only known for goods TradeScribe saw you buy.", 3);
+                    else if (id == "plan") _pending = PickPlanGood;
+                    else if (id == "caravans") _pending = () => ShowPages("My caravans", null, Carry.CaravanEntries(),
+                        "You own no caravans. A caravan trades on its own and sends you its profit.",
+                        "Worth is trade gold plus goods at their base value. It drops when a caravan sends you its profit, so a fall is not always a loss.", 4);
                     else if (id == "summary") _pending = ShowSummary;
                     else if (id == "settings") _pending = ShowSettings;
                 }, null), true);
@@ -143,7 +152,7 @@ namespace TradeScribe
                     }
                     else
                     {
-                        int added = Ledger.AddPins(chosen.Select(e => e.Pin ?? e.Text));
+                        int added = Ledger.AddPins(chosen);
                         Say(added == 0 ? "Already pinned." : "Pinned " + added + ". Find them under Pinned notes.");
                         go(page);
                     }
@@ -290,6 +299,26 @@ namespace TradeScribe
                 }, null, "", false), true);
         }
 
+        private static void PickPlanGood()
+        {
+            List<Held> held = Carry.Holding().OrderByDescending(h => h.Units).ToList();
+            if (held.Count == 0) { ShowPages("Selling plan", null, new List<Entry>(), "You carry no trade goods, food, livestock or horses.", null, 4); return; }
+            List<InquiryElement> items = held.Select((h, i) => new InquiryElement(i, h.Good + " (" + h.Units + ")", null)).ToList();
+            MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData("Selling plan for one good", "Pick a good you carry.", items, true, 1, 1, "Show", "Close",
+                picked =>
+                {
+                    if (picked == null || picked.Count == 0) { _pending = ShowMain; return; }
+                    Held h = held[(int)picked[0].Identifier];
+                    _pending = () =>
+                    {
+                        List<Entry> entries = Carry.PlanEntries(h, out string intro);
+                        ShowPages("Selling plan: " + h.Good, intro, entries, "No place known to buy it yet.",
+                            "Sell where the plan says, in any order. Estimates are the least reliable; check the price on arrival."
+                            + (Settings.MaxDistance > 0 ? " Places further than " + Settings.MaxDistance + " are left out." : ""), 5);
+                    };
+                }, null, "", true), true);
+        }
+
         private static void ShowGoods()
         {
             List<PricePoint> goods = Ledger.Points.Values.GroupBy(p => p.ItemId).Select(g => g.First())
@@ -311,12 +340,26 @@ namespace TradeScribe
             foreach (Quote q in Runs.BuyQuotes(itemId).OrderBy(q => q.Price))
             {
                 string t = q.Town + ": " + Fmt.N(q.Price) + " (" + q.Stock + " in stock, seen " + Fmt.Age(today - q.Day) + ")";
-                res.Add(new Entry { Header = "Buy at, cheapest first", Text = t, Pin = good + ", buy in " + t });
+                res.Add(new Entry { Header = "Buy at, cheapest first", Text = t, Pin = good + ", buy in " + t, ItemId = itemId });
             }
             foreach (Quote q in Runs.SellQuotes(itemId).OrderByDescending(q => q.Price))
             {
                 string t = q.Town + ": " + Fmt.N(q.Price) + " (" + q.Basis + (q.Basis == "estimate" ? "" : ", " + Fmt.Age(today - q.Day)) + ")";
-                res.Add(new Entry { Header = "Sell at, best first", Text = t, Pin = good + ", sell in " + t });
+                res.Add(new Entry { Header = "Sell at, best first", Text = t, Pin = good + ", sell in " + t, ItemId = itemId });
+            }
+            // Price history: each town's buy price over the last 30 days, oldest first.
+            foreach (var kv in Ledger.History.Where(k => k.Key.EndsWith("|" + itemId)))
+            {
+                List<HistPoint> pts = kv.Value.Where(p => p.Buy > 0 && today - p.Day <= 30).ToList();
+                var steps = new List<HistPoint>();
+                foreach (HistPoint p in pts) if (steps.Count == 0 || steps[steps.Count - 1].Buy != p.Buy) steps.Add(p);
+                if (steps.Count < 2) continue;
+                List<HistPoint> show = steps.Skip(Math.Max(0, steps.Count - 5)).ToList();
+                int first = show[0].Buy, last = show[show.Count - 1].Buy;
+                string trend = last > first * 1.05 ? "rising" : last < first * 0.95 ? "falling" : "steady";
+                string town = Ledger.Points.TryGetValue(kv.Key, out PricePoint pp) ? Runs.Label(pp.TownId, pp.Town) : kv.Key;
+                string t = town + ": " + string.Join(" > ", show.Select(p => Fmt.N(p.Buy))) + ", " + trend + " over " + Math.Max(1, show[show.Count - 1].Day - show[0].Day) + " days";
+                res.Add(new Entry { Header = "Price to buy over time", Text = t, Pin = good + " in " + t, ItemId = itemId });
             }
             return res;
         }

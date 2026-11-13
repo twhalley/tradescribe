@@ -15,6 +15,18 @@ stores nothing in your save, so it can be removed at any time.
   it, with profit each, a rough trip profit, and the map distance. Units are capped by your cash,
   the trader's stock and your free carry weight.
 - **Records your trades:** what you bought and sold, and the profit on goods you bought earlier.
+- **What you're carrying:** every good you hold, what you paid, the best places you know to sell it,
+  and a plan to spread a big stock over several towns.
+- **Selling plan:** for one good, how many to sell where. It allows for the price falling as you
+  sell, measured from your own sales of that good.
+- **Notes on arrival:** entering a place that is your best known market for something you carry,
+  or the cheapest known place for a good you pinned, shows a one-line note.
+- **Price history:** each town's price for a good over the last 30 days, rising or falling.
+- **Caravans:** where each of your caravans is and what it is worth, logged once a day.
+- **Villages:** village markets are logged like towns and marked "(village)". The workshop chooser
+  prices inputs from a town's villages when they are cheaper there.
+- **Horse warning:** horse and livestock runs carry a reminder that traders pay little of their
+  own price for them.
 - **Helps your workshops:** for each workshop you own, where its inputs are cheapest and where
   what it makes sells best.
 - **Helps you choose a workshop:** ranks every kind of workshop for a town by the prices you have
@@ -27,7 +39,8 @@ stores nothing in your save, so it can be removed at any time.
 
 TradeScribe only uses what your character could know: trade screens you opened, your own rumour
 list, map distance, your own cash and carry capacity, and the workshops you own (what they use and
-make, their profit and capital, as on the clan screen). The workshop chooser also uses the game's
+make, their profit and capital, as on the clan screen), your own caravans (their gold, goods and
+where they are, as on the clan screen) and your own inventory. The workshop chooser also uses the game's
 recipe for each kind of workshop (wool into garments, and so on), priced only from what you have seen.
 
 After you confirm a deal, the ledger takes the prices as the screen showed them after your own
@@ -44,10 +57,10 @@ pinned notes and trades from days your character has not lived yet. The rows sta
 
 ## Using it
 
-- Press **F7** on the campaign map, or choose **Open the trade ledger** in a town menu.
-- Menu entries: Best trade runs, What to buy here, Plan a run between two places, My workshops,
-  Which workshop suits a town, Prices for one good, Rumour log, My trades and profit, Profit by
-  good and by town, Pinned notes, Settings.
+- Press **F7** on the map, or choose **Open the trade ledger** in a town or village menu.
+- Menu entries: What I'm carrying, Selling plan for one good, Best trade runs, What to buy here,
+  Plan a run between two places, My workshops, Which workshop suits a town, My caravans, Prices
+  for one good, Rumour log, My trades and profit, Profit by good and by town, Pinned notes, Settings.
 - **Settings:** hide runs longer than a chosen distance, rank runs by profit per distance, and
   choose how old a rumour may be before run suggestions ignore it (3 days by default).
 - Long lists are split into pages. The tick button opens **Options**: next and previous page,
@@ -74,6 +87,7 @@ pinned notes and trades from days your character has not lived yet. The rows sta
 | `rumours.csv` | Every trade rumour, with the day you heard it |
 | `trades.csv` | Every confirmed purchase and sale |
 | `pins.csv` | Your pinned notes |
+| `caravans.csv` | What each of your caravans was worth, once a day |
 
 Errors, if any, go to `errors.txt` in the `TradeScribe` folder.
 

@@ -26,15 +26,21 @@ namespace TradeScribe
         private static string _townId, _town;
         private List<ValueTuple<ItemRosterElement, int>> _bought, _sold;
         private static List<Obs> _openRows;    // the trade screen as it was when opened
+        private string _lastPlace; private int _lastDay = -1;
 
         protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
         {
             try
             {
                 if (gameStarterObject is CampaignGameStarter starter)
+                {
                     starter.AddGameMenuOption("town", "tradescribe_ledger", "Open the trade ledger",
                         args => { args.optionLeaveType = GameMenuOption.LeaveType.Trade; return true; },
                         args => LedgerMenu.Open(), false, 8);
+                    starter.AddGameMenuOption("village", "tradescribe_ledger_v", "Open the trade ledger",
+                        args => { args.optionLeaveType = GameMenuOption.LeaveType.Trade; return true; },
+                        args => LedgerMenu.Open(), false, 4);
+                }
             }
             catch (Exception e) { Ledger.LogError(e); }
         }
@@ -50,6 +56,21 @@ namespace TradeScribe
                 _timer += dt;
                 if (_timer < 0.1f) return;
                 _timer = 0f;
+
+                // Arriving somewhere: a note if it is the best known market for what you carry.
+                string place = Settlement.CurrentSettlement?.StringId;
+                if (place != _lastPlace)
+                {
+                    _lastPlace = place;
+                    if (place != null) try { Carry.OnEnter(Settlement.CurrentSettlement); } catch (Exception e) { Ledger.LogError(e); }
+                }
+                // Once a game day, note what your caravans are worth.
+                int day = Ledger.Today;
+                if (day != _lastDay && Hero.MainHero != null)
+                {
+                    _lastDay = day;
+                    try { if (Carry.CaravanCount > 0) Carry.RecordCaravans(); } catch (Exception e) { Ledger.LogError(e); }
+                }
                 InventoryLogic logic = InventoryScreenHelper.GetActiveInventoryState()?.InventoryLogic;
                 if (logic == null)
                 {
@@ -105,7 +126,8 @@ namespace TradeScribe
 
             string msg = "TradeScribe: logged " + order.Count + " goods in " + town + (rumours > 0 ? " and " + rumours + " new rumours" : "") + ".";
             List<Run> here = Runs.Best(townId);
-            if (here.Count > 0) msg += " Best buy here: " + here[0].Good + " for " + here[0].Sell.Town + " (+" + here[0].Each + " each). F7 for more.";
+            if (here.Count > 0) msg += " Best buy here: " + here[0].Good + " for " + here[0].Sell.Town + " (+" + here[0].Each + " each"
+                + (Runs.Walks(here[0].Type) ? "; horses and livestock sell for far less than they cost, check first" : "") + "). F7 for more.";
             InformationManager.DisplayMessage(new InformationMessage(msg, Color.FromUint(0xFFC9A227)));
         }
 
@@ -189,7 +211,7 @@ namespace TradeScribe
             string id = el.EquipmentElement.ItemModifier == null ? it.StringId : it.StringId + "+" + el.EquipmentElement.ItemModifier.StringId;
             if (!rows.TryGetValue(id, out Obs o))
             {
-                string type = it.IsTradeGood ? (it.IsFood ? "Food" : "Trade good") : (it.IsAnimal ? "Animal" : it.ItemType.ToString());
+                string type = Runs.TypeOf(it);
                 o = new Obs { Snap = snap, Hour = Ledger.NowHours, Day = day, Date = date, TownId = townId, Town = town, ItemId = id, Good = name, Type = type, Weight = it.Weight };
                 rows[id] = o; order.Add(o);
             }

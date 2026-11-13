@@ -121,8 +121,23 @@ namespace TradeScribe
             return seen.Count == 0 ? (int?)null : (int)Math.Round(seen.Average());
         }
 
+        /// The cheapest price for an input in the town or in one of its villages you have seen.
+        private static int? InputPrice(string townId, string cat, out string from)
+        {
+            from = null;
+            int? best = PriceIn(townId, cat);
+            foreach (string id in Ledger.Points.Values.Select(p => p.TownId).Distinct())
+            {
+                Settlement v = Settlement.Find(id);
+                if (v == null || !v.IsVillage || v.Village?.Bound?.StringId != townId) continue;
+                int? p = PriceIn(id, cat);
+                if (p != null && (best == null || p < best)) { best = p; from = v.Name.ToString(); }
+            }
+            return best;
+        }
+
         public const string SuitFooter = "A rough guide from prices you have seen in this town. A batch is one round of production; it leaves out "
-            + "wages and how fast each workshop works, and prices shift once a workshop starts buying and selling. Not enough seen means a "
+            + "wages and how fast each workshop works, and prices shift once a workshop starts buying and selling. Inputs may be priced from one of the town's villages if you have seen it cheaper there: buy it there and sell it in the town. Not enough seen means a "
             + "good it uses or makes was not on sale when you looked: scarce inputs are a bad sign, scarce products a good one.";
 
         /// Every kind of workshop, ranked by what one batch would earn at the prices seen in this town.
@@ -141,8 +156,9 @@ namespace TradeScribe
                     foreach (var i in pr.Inputs)
                     {
                         if (i.Item1 == null) continue;
-                        int? p = PriceIn(townId, i.Item1.StringId);
-                        if (p == null) missing.Add(Pretty(i.Item1.StringId)); else { margin -= p.Value * i.Item2; uses.Add(i.Item2 + " " + Pretty(i.Item1.StringId) + " at " + Fmt.N(p.Value)); }
+                        int? p = InputPrice(townId, i.Item1.StringId, out string from);
+                        if (p == null) missing.Add(Pretty(i.Item1.StringId));
+                        else { margin -= p.Value * i.Item2; uses.Add(i.Item2 + " " + Pretty(i.Item1.StringId) + " at " + Fmt.N(p.Value) + (from != null ? " (from " + from + ")" : "")); }
                     }
                     foreach (var o in pr.Outputs)
                     {

@@ -35,20 +35,49 @@ namespace TradeScribe
     }
 
     /// A note the player chose to keep: the text is frozen when pinned and never refreshed or aged out.
-    public class Pin { public double Hour; public string Date = "", Text = ""; }
+    public class Pin { public double Hour; public string Date = "", Text = "", ItemId = ""; }
+    public class HistPoint { public double Hour; public int Day, Buy, Sell, Stock; }
+    public class CaravanPoint { public double Hour; public int Day, Worth; public string Id = "", Name = ""; }
 
     public static class Ledger
     {
         public static readonly List<Pin> Pins = new List<Pin>();
+        /// Every price seen for each town and good, oldest first: town|item -> points.
+        public static readonly Dictionary<string, List<HistPoint>> History = new Dictionary<string, List<HistPoint>>();
+        public static readonly List<CaravanPoint> CaravanLog = new List<CaravanPoint>();
+        private static string CaravanPath => Path.Combine(Dir, "caravans.csv");
+
+        /// What the units of a good you still hold cost you, from trades TradeScribe saw.
+        public static bool CostOf(string itemId, out int units, out int total)
+        {
+            bool ok = Basis.TryGetValue(itemId, out KeyValuePair<int, int> b);
+            units = b.Key; total = b.Value; return ok;
+        }
+
+        /// One entry per caravan per day.
+        public static void AddCaravan(string id, string name, int worth)
+        {
+            EnsureLoaded();
+            int day = Today;
+            if (CaravanLog.Any(c => c.Id == id && c.Day == day)) return;
+            var c2 = new CaravanPoint { Hour = NowHours, Day = day, Id = id, Name = name, Worth = worth };
+            CaravanLog.Add(c2);
+            Directory.CreateDirectory(Dir);
+            string line = string.Join(",", c2.Day.ToString(Inv), Csv.Q(c2.Name), c2.Worth.ToString(Inv), Csv.Q(c2.Id), c2.Hour.ToString("0.###", Inv)) + Environment.NewLine;
+            if (!File.Exists(CaravanPath)) line = "Day,Caravan,Worth,Id,Hour" + Environment.NewLine + line;
+            File.AppendAllText(CaravanPath, line, new UTF8Encoding(false));
+            _maxHour = Math.Max(_maxHour, c2.Hour);
+        }
         private static string PinPath => Path.Combine(Dir, "pins.csv");
 
-        public static int AddPins(IEnumerable<string> texts)
+        public static int AddPins(IEnumerable<Entry> entries)
         {
             EnsureLoaded(); int added = 0;
-            foreach (string t in texts)
+            foreach (Entry e in entries)
             {
+                string t = e.Pin ?? e.Text;
                 if (string.IsNullOrEmpty(t) || Pins.Any(p => p.Text == t)) continue;
-                Pins.Add(new Pin { Hour = NowHours, Date = CampaignTime.Now.ToString(), Text = t }); added++;
+                Pins.Add(new Pin { Hour = NowHours, Date = CampaignTime.Now.ToString(), Text = t, ItemId = e.ItemId ?? "" }); added++;
             }
             if (added > 0) { SavePins(); _maxHour = Math.Max(_maxHour, NowHours); }
             return added;
@@ -62,9 +91,9 @@ namespace TradeScribe
         private static void SavePins()
         {
             Directory.CreateDirectory(Dir);
-            var sb = new StringBuilder(); sb.AppendLine("Hour,Date,Text");
+            var sb = new StringBuilder(); sb.AppendLine("Hour,Date,Text,ItemId");
             foreach (Pin p in Pins)
-                sb.AppendLine(string.Join(",", p.Hour.ToString("0.###", Inv), Csv.Q(p.Date), Csv.Q(p.Text.Replace("\r", "").Replace("\n", "\\n"))));
+                sb.AppendLine(string.Join(",", p.Hour.ToString("0.###", Inv), Csv.Q(p.Date), Csv.Q(p.Text.Replace("\r", "").Replace("\n", "\\n")), Csv.Q(p.ItemId)));
             File.WriteAllText(PinPath, sb.ToString(), new UTF8Encoding(false));
         }
 
@@ -76,7 +105,7 @@ namespace TradeScribe
             {
                 List<string> f = Csv.Parse(line);
                 if (f.Count < 3) continue;
-                Pins.Add(new Pin { Hour = D(f[0]), Date = f[1], Text = f[2].Replace("\\n", "\n") });
+                Pins.Add(new Pin { Hour = D(f[0]), Date = f[1], Text = f[2].Replace("\\n", "\n"), ItemId = f.Count > 3 ? f[3] : "" });
                 _maxHour = Math.Max(_maxHour, D(f[0]));
             }
         }
@@ -126,7 +155,7 @@ namespace TradeScribe
             // logged after this moment, so mark the files and forget it. Nothing is deleted from the files.
             int before = Points.Count + Rumours.Count + Trades.Count;
             string mark = Rewind + "," + now.ToString("0.###", Inv) + Environment.NewLine;
-            foreach (string path in new[] { ObsPath, RumPath, TradePath })
+            foreach (string path in new[] { ObsPath, RumPath, TradePath, CaravanPath })
                 if (File.Exists(path)) File.AppendAllText(path, mark, new UTF8Encoding(false));
             Load();
             // Notes pinned after this moment go too: your character has not written them yet.
@@ -142,7 +171,7 @@ namespace TradeScribe
         /// Rebuilds everything from the files. A REWIND line drops whatever came before it but is dated after it.
         private static void Load()
         {
-            Points.Clear(); Rumours.Clear(); RumourKeys.Clear(); Trades.Clear(); Basis.Clear(); _maxHour = 0;
+            Points.Clear(); History.Clear(); CaravanLog.Clear(); Rumours.Clear(); RumourKeys.Clear(); Trades.Clear(); Basis.Clear(); _maxHour = 0;
             var obs = new List<Obs>();
             if (File.Exists(ObsPath))
                 foreach (string line in File.ReadAllLines(ObsPath).Skip(1))
@@ -187,6 +216,15 @@ namespace TradeScribe
                 }
             foreach (Rumour r in rumours) if (RumourKeys.Add(r.Key)) { Rumours.Add(r); _maxHour = Math.Max(_maxHour, r.Hour); }
             LoadPins();
+            if (File.Exists(CaravanPath))
+                foreach (string line in File.ReadAllLines(CaravanPath).Skip(1))
+                {
+                    List<string> f = Csv.Parse(line);
+                    if (f.Count >= 2 && f[0] == Rewind) { double h = D(f[1]); CaravanLog.RemoveAll(x => x.Hour > h); continue; }
+                    if (f.Count < 5) continue;
+                    CaravanLog.Add(new CaravanPoint { Day = I(f[0], 0), Name = f[1], Worth = I(f[2], 0), Id = f[3], Hour = D(f[4]) });
+                }
+            foreach (CaravanPoint c in CaravanLog) _maxHour = Math.Max(_maxHour, c.Hour);
         }
 
         /// Works out the profit on a sale against what the same goods cost, and keeps the running cost of what is still held.
@@ -258,6 +296,9 @@ namespace TradeScribe
             foreach (Obs o in rows)
             {
                 if (keep.Contains(o.ItemId)) continue;
+                string hk = o.TownId + "|" + o.ItemId;
+                if (!History.TryGetValue(hk, out List<HistPoint> hist)) History[hk] = hist = new List<HistPoint>();
+                hist.Add(new HistPoint { Hour = o.Hour, Day = o.Day, Buy = o.Buy, Sell = o.Sell, Stock = o.Stock });
                 string key = o.TownId + "|" + o.ItemId;
                 if (!Points.TryGetValue(key, out PricePoint p))
                     Points[key] = p = new PricePoint { TownId = o.TownId, ItemId = o.ItemId };
